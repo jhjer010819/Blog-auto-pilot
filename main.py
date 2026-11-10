@@ -1,7 +1,13 @@
-import os
 import json
+import math
+import os
+import re
+import time
+import urllib.request
+import xml.etree.ElementTree as ET
+
 import google.generativeai as genai
-from pytrends.request import TrendReq
+from google.api_core.exceptions import ResourceExhausted
 
 # 1. 제미니 API 설정 (깃허브 Secrets에서 전달받음)
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
@@ -11,31 +17,77 @@ if not GEMINI_API_KEY:
 genai.configure(api_key=GEMINI_API_KEY)
 model = genai.GenerativeModel('gemini-3.8-flash')
 
+# pytrends의 realtime/daily/hottrends 주소는 404다.
+# 한국 실시간 검색어는 구글 트렌드 공개 RSS로 가져온다.
+TRENDS_RSS_URL = "https://trends.google.com/trending/rss?geo=KR"
+# 무료 티어는 분당 5회다. 안내가 더 짧아도 1분은 기다려 창이 지나가게 한다.
+GEMINI_RPM_MIN_WAIT_SECONDS = 60
+_RETRY_AFTER_RE = re.compile(r"retry in\s+([0-9]+(?:\.[0-9]+)?)\s*s", re.IGNORECASE)
+
+# 수집이 완전히 실패했을 때만 쓰는 고정 샘플. 실시간 트렌드가 아니다.
+FALLBACK_SAMPLE_KEYWORDS = [
+    "스타틴 복용법", "유방암 초기증상", "커피 혈당 상승",
+    "2026 청년 월세 지원금 자격", "연말정산 부모님 인적공제",
+    "스마트폰 배터리 절약 팁", "스타벅스 프리퀀시 예약",
+    "김부선", "서동주", "프로포폴 사건"
+]
+
+
+def _parse_trends_rss(payload):
+    root = ET.fromstring(payload)
+    titles = []
+    seen = set()
+    for item in root.findall("./channel/item"):
+        title = (item.findtext("title") or "").strip()
+        if not title or title in seen:
+            continue
+        seen.add(title)
+        titles.append(title)
+        if len(titles) >= 20:
+            break
+    if not titles:
+        raise RuntimeError("구글 트렌드 RSS에 검색어 항목이 없습니다.")
+    return titles
+
+
+def _fetch_live_trend_keywords():
+    request = urllib.request.Request(
+        TRENDS_RSS_URL,
+        headers={
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/131.0.0.0 Safari/537.36"
+            ),
+            "Accept": "application/rss+xml, application/xml, text/xml",
+            "Accept-Language": "ko-KR,ko;q=0.9",
+        },
+    )
+    with urllib.request.urlopen(request, timeout=20) as response:
+        payload = response.read()
+    return _parse_trends_rss(payload)
+
+
 def fetch_multi_category_keywords():
     """
     [1단계: 다중 카테고리 수집]
-    구글 트렌드 API를 통해 다양한 카테고리의 핫 키워드를 수집합니다.
-    (네트워크 에러 방지를 위해 기본 트렌드 수집 실패 시 예비 수집 데이터 fallback 포함)
+    한국 구글 트렌드 실시간 검색어를 수집한다.
+    네트워크/파싱 실패 시에만 테스트 샘플로 대체한다.
     """
     print("🔍 [1단계] 다중 카테고리 트렌드 키워드 수집 시작...")
-    
-    keywords_by_category = {}
-    
+
     try:
-        pytrend = TrendReq(hl='ko-KR', tz=540)
-        # 한국 실시간 급상승 검색어 가져오기
-        df = pytrend.realtime_trending_searches(pn='p23')
-        raw_list = df['title'].tolist()[:20] if not df.empty else []
-        keywords_by_category["realtime_trending"] = raw_list
+        raw_list = _fetch_live_trend_keywords()
+        keywords_by_category = {"realtime_trending": raw_list}
+        print(
+            f"✅ [실시간 수집] 구글 트렌드 RSS(geo=KR)에서 "
+            f"현재 한국 검색어 {len(raw_list)}개를 가져왔습니다."
+        )
     except Exception as e:
-        print(f"⚠️ 구글 트렌드 API 수집 중 참고사항 발생 ({e}), 준비된 테스트 샘플 데이터셋으로 대체 수집합니다.")
-        # 파이프라인 검증용 다종 카테고리 샘플 데이터 (건강, 정책, IT/생활, 가십 믹스)
-        keywords_by_category["multi_pool"] = [
-            "스타틴 복용법", "유방암 초기증상", "커피 혈당 상승",
-            "2026 청년 월세 지원금 자격", "연말정산 부모님 인적공제",
-            "스마트폰 배터리 절약 팁", "스타벅스 프리퀀시 예약",
-            "김부선", "서동주", "프로포폴 사건"
-        ]
+        print("🚨 [FALLBACK] 실시간 트렌드 수집에 실패해 하드코딩된 테스트 샘플 키워드를 사용합니다.")
+        print("🚨 [FALLBACK] 아래 키워드 풀은 현재 검색 트렌드가 아닙니다.")
+        print(f"🚨 [FALLBACK] 실패 원인: {e}")
+        keywords_by_category = {"fallback_sample": list(FALLBACK_SAMPLE_KEYWORDS)}
 
     print(f"   └ 수집된 1차 키워드 풀: {keywords_by_category}")
     return keywords_by_category
@@ -57,10 +109,43 @@ def filter_garbage(keywords_list):
     print(f"   └ 정제 후 키워드 풀: {clean_pool}")
     return clean_pool
 
+def _retry_after_seconds(exc):
+    match = _RETRY_AFTER_RE.search(str(exc))
+    if not match:
+        return None
+    return float(match.group(1))
+
+
+def _is_transient_rpm_limit(exc):
+    """분당 한도만 1회 재시도한다. 일일 한도 문구가 있으면 재시도하지 않는다."""
+    text = str(exc).lower()
+    if "per day" in text or "perday" in text:
+        return False
+    if "per minute" in text or "perminute" in text:
+        return True
+    hint = _retry_after_seconds(exc)
+    return hint is not None and hint <= 120
+
+
+def _rpm_wait_seconds(exc):
+    hint = _retry_after_seconds(exc)
+    if hint is None:
+        return float(GEMINI_RPM_MIN_WAIT_SECONDS)
+    return float(max(GEMINI_RPM_MIN_WAIT_SECONDS, math.ceil(hint)))
+
+
+def _call_gemini(prompt):
+    return model.generate_content(
+        prompt,
+        generation_config={"response_mime_type": "application/json", "temperature": 0.2}
+    )
+
+
 def select_best_longtail_with_gemini(keywords_pool):
     """
     [3&4단계: 제미니 1차 판사]
-    카테고리를 불문하고 오늘 작성 시 팩트 퀄리티와 SEO 유효기간이 가장 미친 1개 키워드 최종 픽
+    카테고리를 불문하고 오늘 작성 시 팩트 퀄리티와 SEO 유효기간이 가장 미친 1개 키워드 최종 픽.
+    분당 429는 약 1분(서버 안내가 더 길면 그 시간) 기다린 뒤 딱 한 번만 다시 호출한다.
     """
     print("🤖 [3~4단계] 제미니 API가 전체 카테고리 중 최적의 1개 롱테일 최종 낙점 중...")
     
@@ -85,12 +170,26 @@ def select_best_longtail_with_gemini(keywords_pool):
         "longtail_title": "최종 확정된 롱테일 블로그 제목"
     }}
     """
-    
-    response = model.generate_content(
-        prompt,
-        generation_config={"response_mime_type": "application/json", "temperature": 0.2}
-    )
-    
+
+    try:
+        response = _call_gemini(prompt)
+    except ResourceExhausted as exc:
+        if not _is_transient_rpm_limit(exc):
+            print("🚨 Gemini 할당량 초과입니다. 일일 한도로 보여 재시도하지 않고 종료합니다.")
+            raise
+        wait = _rpm_wait_seconds(exc)
+        hint = _retry_after_seconds(exc)
+        if hint is None:
+            print(f"⏳ Gemini 분당 요청 한도(429)입니다. 재시도 안내가 없어 {wait:.0f}초 대기 후 1회만 재시도합니다.")
+        else:
+            print(
+                f"⏳ Gemini 분당 요청 한도(429)입니다. "
+                f"서버 안내 {hint:.1f}초, 실제 대기 {wait:.0f}초 후 1회만 재시도합니다."
+            )
+        time.sleep(wait)
+        print("🔁 Gemini 요청을 1회 재시도합니다.")
+        response = _call_gemini(prompt)
+
     return json.loads(response.text)
 
 if __name__ == "__main__":
