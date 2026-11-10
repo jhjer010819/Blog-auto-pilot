@@ -1,0 +1,30 @@
+name: Keyword selector
+
+# Manual switch for the keyword selector. The schedule below stays commented
+# out so this workflow does not run unattended until it is explicitly enabled.
+on:
+  workflow_dispatch:
+  # schedule:
+  #   - cron: "0 9 * * *"
+
+jobs:
+  keyword-selector:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Run keyword selector
+        # GEMINI_API_KEY will be required once Gemini selection is implemented.
+        # Store it as a repository secret and pass it in this step, for example:
+        # env:
+        #   GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: python main.py
