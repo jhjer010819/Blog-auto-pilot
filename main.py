@@ -9,7 +9,7 @@ if not GEMINI_API_KEY:
     raise ValueError("GEMINI_API_KEY가 설정되지 않았습니다. Secrets를 확인해주세요.")
 
 genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel('gemini-2.5-flash')
+model = genai.GenerativeModel('gemini-3.8-flash')
 
 def fetch_multi_category_keywords():
     """
