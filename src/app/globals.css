@@ -63,6 +63,11 @@ a:focus-visible {
   margin-top: 1.05rem;
 }
 
+.post-body p.post-disclaimer {
+  color: var(--muted);
+  font-style: italic;
+}
+
 .post-body h2 {
   margin-top: 2.1rem;
   color: var(--ink);

@@ -53,8 +53,15 @@ function isSafeHref(href: string) {
   }
 }
 
+const DISCLAIMER_CLASS = "post-disclaimer";
+
+const DISCLAIMER_SENTENCES = [
+  "본 글은 정보 제공을 목적으로 작성되었으며, 정확한 진단 및 치료는 반드시 전문의와 상담하시기 바랍니다.",
+  "정부 정책 및 지원 기준은 시기별로 개정될 수 있으므로 정확한 내용은 공식 기관 공고를 확인해 주세요.",
+];
+
 export function sanitizePostHtml(html: string) {
-  return sanitizeHtml(html, {
+  return markDisclaimerParagraphs(sanitizeHtml(html, {
     allowedTags: ALLOWED_TAGS,
     allowedAttributes: {
       a: ["href", "title", "target", "rel"],
@@ -91,7 +98,108 @@ export function sanitizePostHtml(html: string) {
         },
       }),
     },
+  }));
+}
+
+export function markDisclaimerParagraphs(html: string) {
+  return html.replace(/<p\b([^>]*)>([\s\S]*?)<\/p>/gi, (_full, rawAttrs: string, inner: string) => {
+    const attrs = rawAttrs ?? "";
+    const text = textFromHtml(inner);
+    const { found, rest } = leftoverAfterDisclaimers(text);
+    if (!found) return `<p${attrs}>${inner}</p>`;
+    if (!rest) return `<p${withDisclaimerClass(attrs)}>${inner}</p>`;
+    if (inner.includes("<")) return `<p${attrs}>${inner}</p>`;
+    return splitPlainDisclaimerParagraph(attrs, inner);
   });
+}
+
+function leftoverAfterDisclaimers(text: string) {
+  let rest = text.replace(/\s+/g, " ").trim();
+  let found = false;
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const sentence of DISCLAIMER_SENTENCES) {
+      if (!rest.includes(sentence)) continue;
+      rest = rest.replace(sentence, " ").replace(/\s+/g, " ").trim();
+      found = true;
+      changed = true;
+    }
+  }
+  return { found, rest };
+}
+
+function splitPlainDisclaimerParagraph(attrs: string, inner: string) {
+  const pieces: { kind: "body" | "disclaimer"; text: string }[] = [];
+  let rest = inner;
+  while (rest.length > 0) {
+    let earliest = -1;
+    let sentence = "";
+    for (const candidate of DISCLAIMER_SENTENCES) {
+      const index = rest.indexOf(candidate);
+      if (index !== -1 && (earliest === -1 || index < earliest)) {
+        earliest = index;
+        sentence = candidate;
+      }
+    }
+    if (earliest === -1) {
+      pieces.push({ kind: "body", text: rest });
+      break;
+    }
+    if (earliest > 0) pieces.push({ kind: "body", text: rest.slice(0, earliest) });
+    pieces.push({ kind: "disclaimer", text: sentence });
+    rest = rest.slice(earliest + sentence.length);
+  }
+
+  const groups: { kind: "body" | "disclaimer"; text: string }[] = [];
+  let pending = "";
+  for (const piece of pieces) {
+    if (!textFromHtml(piece.text)) {
+      if (groups.length > 0) groups[groups.length - 1].text += piece.text;
+      else pending += piece.text;
+      continue;
+    }
+    const text = pending + piece.text;
+    pending = "";
+    const last = groups[groups.length - 1];
+    if (last && last.kind === piece.kind) last.text += text;
+    else groups.push({ kind: piece.kind, text });
+  }
+  if (pending && groups.length > 0) groups[groups.length - 1].text += pending;
+
+  const bodyAttrs = withoutDisclaimerClass(attrs);
+  return groups
+    .map((group) => {
+      const content = group.text.replace(/^\s+|\s+$/g, "");
+      if (!content) return "";
+      const tagAttrs = group.kind === "disclaimer" ? ` class="${DISCLAIMER_CLASS}"` : bodyAttrs;
+      return `<p${tagAttrs}>${content}</p>`;
+    })
+    .filter(Boolean)
+    .join("\n");
+}
+
+function withDisclaimerClass(attrs: string) {
+  const match = /\bclass\s*=\s*"([^"]*)"/i.exec(attrs);
+  if (match) {
+    const classes = match[1].split(/\s+/).filter(Boolean);
+    if (!classes.includes(DISCLAIMER_CLASS)) classes.push(DISCLAIMER_CLASS);
+    const replaced = `class="${classes.join(" ")}"`;
+    return `${attrs.slice(0, match.index)}${replaced}${attrs.slice(match.index + match[0].length)}`;
+  }
+  if (!attrs) return ` class="${DISCLAIMER_CLASS}"`;
+  return `${attrs.startsWith(" ") ? "" : " "}${attrs} class="${DISCLAIMER_CLASS}"`;
+}
+
+function withoutDisclaimerClass(attrs: string) {
+  const match = /\bclass\s*=\s*"([^"]*)"/i.exec(attrs);
+  if (!match) return attrs;
+  const classes = match[1].split(/\s+/).filter((name) => name && name !== DISCLAIMER_CLASS);
+  const replaced = classes.length > 0 ? `class="${classes.join(" ")}"` : "";
+  let next = `${attrs.slice(0, match.index)}${replaced}${attrs.slice(match.index + match[0].length)}`;
+  next = next.replace(/[ \t]{2,}/g, " ").replace(/^[ \t]+$/, "");
+  if (next && !next.startsWith(" ")) next = ` ${next}`;
+  return next;
 }
 
 export function textFromHtml(html: string) {

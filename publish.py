@@ -486,7 +486,119 @@ def markdown_to_html(body: str) -> str:
         extensions=["tables", "fenced_code", "sane_lists"],
         output_format="html",
     )
-    return html.strip()
+    return mark_disclaimer_paragraphs(html.strip())
+
+
+_DISCLAIMER_CLASS = "post-disclaimer"
+_PARAGRAPH_RE = re.compile(r"<p\b([^>]*)>(.*?)</p>", re.IGNORECASE | re.DOTALL)
+
+
+def mark_disclaimer_paragraphs(html: str) -> str:
+    def replace(match: re.Match[str]) -> str:
+        attrs = match.group(1) or ""
+        inner = match.group(2)
+        found, rest = _leftover_after_disclaimers(plain_from_html(inner))
+        if not found:
+            return f"<p{attrs}>{inner}</p>"
+        if not rest:
+            return f"<p{_with_disclaimer_class(attrs)}>{inner}</p>"
+        if "<" in inner:
+            return f"<p{attrs}>{inner}</p>"
+        return _split_plain_disclaimer_paragraph(attrs, inner)
+
+    return _PARAGRAPH_RE.sub(replace, html)
+
+
+def _leftover_after_disclaimers(text: str) -> tuple[bool, str]:
+    rest = re.sub(r"\s+", " ", text).strip()
+    found = False
+    changed = True
+    while changed:
+        changed = False
+        for sentence in _DISCLAIMERS:
+            if sentence not in rest:
+                continue
+            rest = re.sub(r"\s+", " ", rest.replace(sentence, " ", 1)).strip()
+            found = True
+            changed = True
+    return found, rest
+
+
+def _split_plain_disclaimer_paragraph(attrs: str, inner: str) -> str:
+    pieces: list[tuple[str, str]] = []
+    rest = inner
+    while rest:
+        earliest = -1
+        sentence = ""
+        for candidate in _DISCLAIMERS:
+            index = rest.find(candidate)
+            if index != -1 and (earliest == -1 or index < earliest):
+                earliest = index
+                sentence = candidate
+        if earliest == -1:
+            pieces.append(("body", rest))
+            break
+        if earliest > 0:
+            pieces.append(("body", rest[:earliest]))
+        pieces.append(("disclaimer", sentence))
+        rest = rest[earliest + len(sentence) :]
+
+    groups: list[tuple[str, str]] = []
+    pending = ""
+    for kind, text in pieces:
+        if not plain_from_html(text):
+            if groups:
+                groups[-1] = (groups[-1][0], groups[-1][1] + text)
+            else:
+                pending += text
+            continue
+        text = pending + text
+        pending = ""
+        if groups and groups[-1][0] == kind:
+            groups[-1] = (kind, groups[-1][1] + text)
+        else:
+            groups.append((kind, text))
+    if pending and groups:
+        groups[-1] = (groups[-1][0], groups[-1][1] + pending)
+
+    body_attrs = _without_disclaimer_class(attrs)
+    rendered: list[str] = []
+    for kind, text in groups:
+        content = text.strip()
+        if not content:
+            continue
+        tag_attrs = f' class="{_DISCLAIMER_CLASS}"' if kind == "disclaimer" else body_attrs
+        rendered.append(f"<p{tag_attrs}>{content}</p>")
+    return "\n".join(rendered)
+
+
+def _with_disclaimer_class(attrs: str) -> str:
+    match = re.search(r'\bclass\s*=\s*"([^"]*)"', attrs, flags=re.IGNORECASE)
+    if match:
+        classes = [part for part in match.group(1).split() if part]
+        if _DISCLAIMER_CLASS not in classes:
+            classes.append(_DISCLAIMER_CLASS)
+        replaced = f'class="{" ".join(classes)}"'
+        return attrs[: match.start()] + replaced + attrs[match.end() :]
+    if not attrs:
+        return f' class="{_DISCLAIMER_CLASS}"'
+    prefix = "" if attrs.startswith(" ") else " "
+    return f'{prefix}{attrs} class="{_DISCLAIMER_CLASS}"'
+
+
+def _without_disclaimer_class(attrs: str) -> str:
+    match = re.search(r'\bclass\s*=\s*"([^"]*)"', attrs, flags=re.IGNORECASE)
+    if not match:
+        return attrs
+    classes = [part for part in match.group(1).split() if part and part != _DISCLAIMER_CLASS]
+    replaced = f'class="{" ".join(classes)}"' if classes else ""
+    nxt = attrs[: match.start()] + replaced + attrs[match.end() :]
+    nxt = re.sub(r"[ \t]{2,}", " ", nxt)
+    if nxt.strip() == "":
+        return ""
+    if not nxt.startswith(" "):
+        nxt = f" {nxt}"
+    return nxt
 
 
 def render_post_file(meta: dict, body_html: str) -> str:

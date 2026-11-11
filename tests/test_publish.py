@@ -77,6 +77,8 @@ class PublishTests(unittest.TestCase):
             self.assertIn("예시", body)
             self.assertIn("전문의와 상담하시기 바랍니다.", body)
             self.assertIn("공식 기관 공고를 확인해 주세요.", body)
+            self.assertIn('<p class="post-disclaimer">', body)
+            self.assertEqual(body.count("post-disclaimer"), 1)
             self.assertNotIn("<h1>", body.lower())
             self.assertNotIn("<!doctype", text.lower())
             self.assertNotIn("<html", text.lower())
@@ -361,6 +363,41 @@ class PublishTests(unittest.TestCase):
         self.assertIn('default: true', stage2)
         self.assertIn('default: false', stage2)
         self.assertIn("gemini-3.8-flash", (ROOT / "publish.py").read_text(encoding="utf-8"))
+
+    def test_disclaimer_paragraphs_are_marked_without_changing_wording(self) -> None:
+        health, policy = publish._DISCLAIMERS
+        both = f"<p>{health} {policy}</p>"
+        marked = publish.mark_disclaimer_paragraphs(both)
+        self.assertEqual(marked, f'<p class="post-disclaimer">{health} {policy}</p>')
+        self.assertEqual(publish.mark_disclaimer_paragraphs(marked), marked)
+
+        separate = publish.mark_disclaimer_paragraphs(f"<p>{health}</p>\n<p>{policy}</p>")
+        self.assertEqual(
+            separate,
+            f'<p class="post-disclaimer">{health}</p>\n<p class="post-disclaimer">{policy}</p>',
+        )
+
+        mixed = publish.mark_disclaimer_paragraphs(f"<p>마지막 안내입니다. {health} {policy}</p>")
+        self.assertEqual(
+            mixed,
+            "<p>마지막 안내입니다.</p>\n"
+            f'<p class="post-disclaimer">{health} {policy}</p>',
+        )
+        self.assertEqual(mixed.count(health), 1)
+        self.assertEqual(mixed.count(policy), 1)
+
+        self.assertEqual(
+            publish.mark_disclaimer_paragraphs("<p>정부 정책은 바뀝니다.</p>"),
+            "<p>정부 정책은 바뀝니다.</p>",
+        )
+        tagged = f"<p>안내 <strong>{health}</strong></p>"
+        self.assertEqual(publish.mark_disclaimer_paragraphs(tagged), tagged)
+
+        from_markdown = publish.markdown_to_html(f"본문입니다.\n\n{health}\n\n{policy}\n")
+        self.assertEqual(from_markdown.count("post-disclaimer"), 2)
+        self.assertIn(f'<p class="post-disclaimer">{health}</p>', from_markdown)
+        self.assertIn(f'<p class="post-disclaimer">{policy}</p>', from_markdown)
+        self.assertIn("<p>본문입니다.</p>", from_markdown)
 
     def test_description_uses_two_intro_sentences_and_skips_headings(self) -> None:
         html = (
