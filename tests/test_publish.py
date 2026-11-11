@@ -46,7 +46,7 @@ class PublishTests(unittest.TestCase):
                 root,
                 str(FIXTURE),
                 "--category",
-                "예시",
+                "생활정보",
                 "--slug",
                 "format-check",
                 "--date",
@@ -70,7 +70,7 @@ class PublishTests(unittest.TestCase):
                 "이 파일은 게시 스크립트가 표, 제목, 강조, 목록을 지키는지 확인하는 짧은 예시입니다. 실제 게시 글이 아닙니다.",
             )
             self.assertNotIn("첫 번째 소제목", meta["description"])
-            self.assertEqual(meta["category"], "예시")
+            self.assertEqual(meta["category"], "생활정보")
             self.assertEqual(meta["date"], "2026-11-10")
             self.assertEqual(meta["cover"], "/images/cover.jpg")
             self.assertEqual(meta["related"], [])
@@ -103,7 +103,7 @@ class PublishTests(unittest.TestCase):
             write_text(second, "# 고친 제목\n\n본문을 고쳤습니다.\n")
             common = [
                 "--category",
-                "예시",
+                "생활정보",
                 "--slug",
                 "same-slug",
                 "--date",
@@ -168,7 +168,7 @@ class PublishTests(unittest.TestCase):
                     """\
                     ---
                     title: 프론트 제목
-                    category: 정책
+                    category: 정책·제도
                     date: 2026-03-03
                     slug: front-slug
                     cover: /images/cover.jpg
@@ -188,7 +188,7 @@ class PublishTests(unittest.TestCase):
                 (root / "content" / "posts" / "front-slug.html").read_text(encoding="utf-8")
             )
             self.assertEqual(meta["title"], "프론트 제목")
-            self.assertEqual(meta["category"], "정책")
+            self.assertEqual(meta["category"], "정책·제도")
             self.assertEqual(meta["date"], "2026-03-03")
             self.assertEqual(meta["cover"], "/images/cover.jpg")
             self.assertEqual(meta["related"], [{"title": "다른 글", "href": "/posts/other/"}])
@@ -202,7 +202,7 @@ class PublishTests(unittest.TestCase):
                 root,
                 str(FIXTURE),
                 "--category",
-                "예시",
+                "생활정보",
                 "--dry-run",
                 env=env,
             )
@@ -236,7 +236,7 @@ class PublishTests(unittest.TestCase):
                 root,
                 str(FIXTURE),
                 "--category",
-                "예시",
+                "생활정보",
                 "--date",
                 "2026/11/10",
             )
@@ -259,7 +259,7 @@ class PublishTests(unittest.TestCase):
                 root,
                 str(FIXTURE),
                 "--category",
-                "예시",
+                "생활정보",
                 "--polish",
                 env=env,
             )
@@ -337,7 +337,7 @@ class PublishTests(unittest.TestCase):
                 work,
                 str(source),
                 "--category",
-                "예시",
+                "생활정보",
                 "--slug",
                 "push-check",
                 "--date",
@@ -532,7 +532,7 @@ class PublishTests(unittest.TestCase):
                 root,
                 str(FIXTURE),
                 "--category",
-                "예시",
+                "생활정보",
                 "--slug",
                 "has-cover",
                 "--date",
@@ -621,7 +621,7 @@ class PublishTests(unittest.TestCase):
                 root,
                 str(FIXTURE),
                 "--category",
-                "예시",
+                "생활정보",
                 "--slug",
                 "no-key",
                 "--date",
@@ -816,10 +816,318 @@ class PublishTests(unittest.TestCase):
         self.assertTrue(hasattr(generativeai, "GenerativeModel"))
 
 
-def sample_post(title: str, date: str) -> str:
+    def test_category_allowlist_accepts_nine_labels_and_rejects_others(self) -> None:
+        expected = (
+            "교육",
+            "건강",
+            "과학",
+            "IT",
+            "부동산",
+            "정부혜택",
+            "세금",
+            "정책\u00b7제도",
+            "생활정보",
+        )
+        self.assertEqual(publish.ALLOWED_CATEGORIES, expected)
+        self.assertEqual(tuple(publish.CATEGORY_PURPOSES), expected)
+        policy = expected[7]
+        self.assertEqual(policy[2], "\u00b7")
+        self.assertNotEqual(policy[2], "\u30fb")
+        for category in expected:
+            self.assertEqual(publish.validate_category(f"  {category}  "), category)
+        for bad in ("", "예시", "정책", "IT생활", "it", "정책.제도", "정책\u30fb제도"):
+            with self.assertRaises(publish.PublishError):
+                publish.validate_category(bad)
+
+        prompt = publish.category_selection_prompt()
+        for category in expected:
+            self.assertIn(category, prompt)
+        self.assertIn("목적", prompt)
+        self.assertIn("realtime_trending", prompt)
+        self.assertIn("fallback_sample", prompt)
+        self.assertIn("사관학교", prompt)
+        self.assertIn("청년 월세", prompt)
+        self.assertIn("스타벅스", prompt)
+        self.assertIn("건강 조언", prompt)
+        self.assertIn("지원금 신청은 여기에 넣지 않는다", prompt)
+
+        selector = (ROOT / "main.py").read_text(encoding="utf-8")
+        self.assertIn("category_selection_prompt()", selector)
+        self.assertIn("validate_category(", selector)
+        self.assertIn("글의 목적", selector)
+        self.assertNotIn("IT생활", selector)
+
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        posts_ts = (ROOT / "src" / "lib" / "posts.ts").read_text(encoding="utf-8")
+        for category in expected:
+            self.assertIn(category, readme)
+            self.assertIn(category, posts_ts)
+        self.assertIn("같은 분류", readme)
+        self.assertIn("다른 분류", readme)
+        self.assertIn("ALLOWED_CATEGORIES", posts_ts)
+
+    def test_invalid_category_does_not_write(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for bad in ("예시", "정책", "IT생활", "정책\u30fb제도"):
+                result = run_publish(
+                    root,
+                    str(FIXTURE),
+                    "--category",
+                    bad,
+                    "--slug",
+                    "rejected",
+                    "--date",
+                    "2026-11-10",
+                    "--no-related",
+                    "--cover",
+                    "/images/cover.jpg",
+                )
+                self.assertNotEqual(result.returncode, 0, bad)
+                self.assertIn("허용", result.stderr)
+                self.assertIn(bad, result.stderr)
+                self.assertFalse((root / "content" / "posts").exists())
+
+            source = root / "front.md"
+            write_text(
+                source,
+                textwrap.dedent(
+                    """\
+                    ---
+                    category: 정책
+                    ---
+                    # 프론트 제목
+
+                    본문입니다.
+                    """
+                ),
+            )
+            front = run_publish(root, str(source), "--cover", "/images/cover.jpg", "--no-related")
+            self.assertNotEqual(front.returncode, 0)
+            self.assertIn("허용", front.stderr)
+            self.assertIn("정책", front.stderr)
+            self.assertFalse((root / "content" / "posts").exists())
+
+    def test_each_allowed_category_passes_without_api_key(self) -> None:
+        env = os.environ.copy()
+        env.pop("GEMINI_API_KEY", None)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for category in publish.ALLOWED_CATEGORIES:
+                result = run_publish(
+                    root,
+                    str(FIXTURE),
+                    "--category",
+                    category,
+                    "--dry-run",
+                    "--no-related",
+                    env=env,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn(f"분류: {category}", result.stdout)
+            self.assertEqual(list((root / "content").glob("**/*")), [])
+
+    def test_auto_related_same_category_does_not_pad(self) -> None:
+        posts = [
+            {"slug": "old-health", "title": "오래된 건강", "date": "2020-01-01", "category": "건강"},
+            {"slug": "new-tax", "title": "최신 세금", "date": "2026-08-01", "category": "세금"},
+            {"slug": "mid-life", "title": "생활", "date": "2026-05-05", "category": "생활정보"},
+            {"slug": "also-health", "title": "다른 건강", "date": "2024-04-04", "category": "건강"},
+            {"slug": "self", "title": "자기", "date": "2026-11-11", "category": "건강"},
+            {"slug": "h1", "title": "하나", "date": "2026-01-01", "category": "건강"},
+            {"slug": "h2", "title": "둘", "date": "2026-02-02", "category": "건강"},
+            {"slug": "h3", "title": "셋", "date": "2026-03-03", "category": "건강"},
+        ]
+        related = publish.auto_related(posts, "self", "건강")
+        self.assertEqual([item["title"] for item in related], ["셋", "둘", "하나"])
+        blob = json.dumps(related, ensure_ascii=False)
+        self.assertNotIn("세금", blob)
+        self.assertNotIn("생활", blob)
+        self.assertNotIn("fieldtrip", blob)
+        self.assertNotIn("tone", blob)
+        self.assertTrue(all(set(item) == {"title", "href"} for item in related))
+        self.assertTrue(all(item["href"].startswith("/posts/") for item in related))
+
+        only_one = [post for post in posts if post["slug"] in {"old-health", "new-tax", "self"}]
+        self.assertEqual(
+            publish.auto_related(only_one, "self", "건강"),
+            [{"title": "오래된 건강", "href": "/posts/old-health/"}],
+        )
+
+    def test_auto_related_falls_back_only_when_category_has_no_siblings(self) -> None:
+        posts = [
+            {"slug": "a", "title": "A", "date": "2026-01-01", "category": "세금"},
+            {"slug": "b", "title": "B", "date": "2026-03-03", "category": "IT"},
+            {"slug": "c", "title": "C", "date": "2026-05-05", "category": "부동산"},
+            {"slug": "d", "title": "D", "date": "2024-01-01", "category": "생활정보"},
+            {"slug": "self", "title": "자기", "date": "2026-11-11", "category": "교육"},
+        ]
+        related = publish.auto_related(posts, "self", "교육")
+        self.assertEqual(
+            [item["href"] for item in related],
+            ["/posts/c/", "/posts/b/", "/posts/a/"],
+        )
+        self.assertNotIn("/posts/d/", [item["href"] for item in related])
+        self.assertNotIn("/posts/self/", [item["href"] for item in related])
+
+        posts.append({"slug": "edu", "title": "입학", "date": "2020-01-01", "category": "교육"})
+        self.assertEqual(
+            publish.auto_related(posts, "self", "교육"),
+            [{"title": "입학", "href": "/posts/edu/"}],
+        )
+
+    def test_publish_related_prefers_same_category_and_skips_tool_links(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            posts = root / "content" / "posts"
+            write_text(posts / "old-health.html", sample_post("오래된 건강 글", "2020-01-01", "건강"))
+            tool_meta = {
+                "title": "최신 세금 글",
+                "category": "세금",
+                "date": "2026-08-01",
+                "cover": "",
+                "related": [
+                    {
+                        "title": "[추천 툴] 초등 체험학습 보고서 3초 자동 생성기",
+                        "href": "https://fieldtrip.mymallow.cloud/",
+                        "tone": "tool",
+                    }
+                ],
+            }
+            write_text(posts / "new-tax.html", publish.render_post_file(tool_meta, "<p>본문</p>"))
+            before = (posts / "new-tax.html").read_text(encoding="utf-8")
+            self.assertIn("fieldtrip.mymallow.cloud", before)
+            self.assertIn('"tone": "tool"', before)
+            source = root / "draft.md"
+            write_text(source, "# 새 건강 글\n\n본문입니다.\n")
+            result = run_publish(
+                root,
+                str(source),
+                "--category",
+                "건강",
+                "--slug",
+                "new-health",
+                "--date",
+                "2026-11-11",
+                "--cover",
+                "/images/cover.jpg",
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            meta, _body = publish.parse_post_file((posts / "new-health.html").read_text(encoding="utf-8"))
+            self.assertEqual(
+                meta["related"],
+                [{"title": "오래된 건강 글", "href": "/posts/old-health/"}],
+            )
+            self.assertNotIn("fieldtrip", json.dumps(meta["related"], ensure_ascii=False))
+            self.assertEqual((posts / "new-tax.html").read_text(encoding="utf-8"), before)
+
+            overridden = run_publish(
+                root,
+                str(source),
+                "--category",
+                "건강",
+                "--slug",
+                "manual-health",
+                "--date",
+                "2026-11-11",
+                "--cover",
+                "/images/cover.jpg",
+                "--related",
+                "[추천 툴] 초등 체험학습 보고서 3초 자동 생성기|https://fieldtrip.mymallow.cloud/",
+            )
+            self.assertEqual(overridden.returncode, 0, overridden.stderr)
+            manual, _body = publish.parse_post_file(
+                (posts / "manual-health.html").read_text(encoding="utf-8")
+            )
+            self.assertEqual(
+                manual["related"],
+                [
+                    {
+                        "title": "[추천 툴] 초등 체험학습 보고서 3초 자동 생성기",
+                        "href": "https://fieldtrip.mymallow.cloud/",
+                    }
+                ],
+            )
+
+    def test_publish_related_falls_back_when_category_has_no_siblings(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            posts = root / "content" / "posts"
+            write_text(posts / "tax.html", sample_post("세금 글", "2026-01-01", "세금"))
+            write_text(posts / "it.html", sample_post("IT 글", "2026-03-03", "IT"))
+            write_text(posts / "land.html", sample_post("부동산 글", "2026-05-05", "부동산"))
+            write_text(posts / "life.html", sample_post("생활 글", "2024-01-01", "생활정보"))
+            source = root / "draft.md"
+            write_text(source, "# 교육 글\n\n본문입니다.\n")
+            result = run_publish(
+                root,
+                str(source),
+                "--category",
+                "교육",
+                "--slug",
+                "edu-note",
+                "--date",
+                "2026-11-11",
+                "--cover",
+                "/images/cover.jpg",
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            meta, _body = publish.parse_post_file((posts / "edu-note.html").read_text(encoding="utf-8"))
+            self.assertEqual(
+                [item["href"] for item in meta["related"]],
+                ["/posts/land/", "/posts/it/", "/posts/tax/"],
+            )
+            self.assertNotIn("fieldtrip", json.dumps(meta["related"], ensure_ascii=False))
+
+    def test_existing_posts_keep_tool_links_and_allowlisted_categories(self) -> None:
+        posts = publish.load_existing_posts(ROOT / "content" / "posts")
+        by_slug = {post["slug"]: post for post in posts}
+        sagwan = "sagwanhakgyo-sinchegeomsa-bulhapgyeok-gijungwa-ipsi-jiwonja-jaegeom-daecheobeop"
+        self.assertEqual(by_slug[sagwan]["category"], "교육")
+        self.assertEqual(by_slug["2026-year-end-tax-refund"]["category"], "세금")
+        self.assertEqual(by_slug["2026-youth-rent-support"]["category"], "정부혜택")
+        self.assertEqual(by_slug["starbucks-winter-frequency"]["category"], "생활정보")
+
+        benefit = publish.auto_related(posts, "brand-new", "정부혜택")
+        benefit_hrefs = [item["href"] for item in benefit]
+        self.assertIn("/posts/2026-youth-rent-support/", benefit_hrefs)
+        self.assertNotIn(f"/posts/{sagwan}/", benefit_hrefs)
+        self.assertLessEqual(len(benefit), publish.RELATED_LIMIT)
+        self.assertTrue(all(item["href"].startswith("/posts/") for item in benefit))
+
+        education = publish.auto_related(posts, "brand-new", "교육")
+        self.assertEqual(education, [{"title": by_slug[sagwan]["title"], "href": f"/posts/{sagwan}/"}])
+
+        science = publish.auto_related(posts, "brand-new", "과학")
+        self.assertEqual(len(science), publish.RELATED_LIMIT)
+        self.assertTrue(all(item["href"].startswith("/posts/") and "fieldtrip" not in item["href"] for item in science))
+
+        tax = (ROOT / "content" / "posts" / "2026-year-end-tax-refund.html").read_text(encoding="utf-8")
+        youth = (ROOT / "content" / "posts" / "2026-youth-rent-support.html").read_text(encoding="utf-8")
+        life = (ROOT / "content" / "posts" / "starbucks-winter-frequency.html").read_text(encoding="utf-8")
+        school = (ROOT / "content" / "posts" / f"{sagwan}.html").read_text(encoding="utf-8")
+        for source, category in (
+            (tax, "세금"),
+            (youth, "정부혜택"),
+            (life, "생활정보"),
+            (school, "교육"),
+        ):
+            self.assertIn(f'"category": "{category}"', source)
+        for source in (tax, youth, life):
+            self.assertIn("https://fieldtrip.mymallow.cloud/", source)
+            self.assertIn('"tone": "tool"', source)
+        self.assertNotIn("fieldtrip", school)
+        self.assertIn("/posts/2026-youth-rent-support/", school)
+        self.assertIn("/posts/starbucks-winter-frequency/", school)
+        self.assertIn("/posts/2026-year-end-tax-refund/", school)
+        self.assertIn("2026 연말정산 환급금 3초 조회 방법", tax)
+        self.assertIn(APPROVED_TITLE, school)
+
+
+def sample_post(title: str, date: str, category: str = "건강") -> str:
     meta = {
         "title": title,
-        "category": "예시",
+        "category": category,
         "date": date,
         "cover": "",
         "related": [],
@@ -851,7 +1159,7 @@ def info_lab_post(title: str, date: str) -> str:
     return f'<script type="application/json" id="post-meta">\n{payload}\n</script>\n<p>본문</p>\n'
 
 
-def cover_args(root: Path, source: Path, slug: str, category: str = "예시") -> publish.argparse.Namespace:
+def cover_args(root: Path, source: Path, slug: str, category: str = "생활정보") -> publish.argparse.Namespace:
     return publish.parse_args(
         [
             str(source),

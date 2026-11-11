@@ -39,6 +39,7 @@ npm run dev
 봇이 넣는 것은 본문뿐입니다. 홈으로 돌아가기, 제목, 발행일, “함께 읽으면 유용한 정보”는 템플릿이 붙입니다.
 
 - `date`는 `YYYY-MM-DD`
+- `category`는 아래 「분류」의 아홉 가지 중 하나여야 합니다. 다른 값이면 빌드가 실패합니다.
 - `thumbnail`은 `public/images`에 둔 파일의 경로(`/images/...`)이거나 `https` 주소
 - `links[].tone`에 `"tool"`을 주면 파란 추천 툴 줄로 표시됩니다
 - 본문의 스크립트, 이벤트 속성, `javascript:` 주소는 빌드할 때 제거됩니다
@@ -80,15 +81,33 @@ python publish.py path/to/post.md --category 정부혜택 --push
 
 경로를 생략하면 `inbox/post.md`를 읽습니다. `--polish`는 `GEMINI_API_KEY`가 있을 때 `gemini-3.8-flash`로 문체만 다듬습니다. 숫자, 제목, 표의 행, 의학·정책 고지, 공백 포함 1800~2500자 범위가 깨지면 파일을 쓰지 않습니다. `--push`를 주지 않으면 커밋과 푸시를 하지 않고, 강제 푸시도 하지 않습니다.
 
-표지는 `--cover /images/name.jpg` 또는 front matter `cover`가 있으면 그 경로를 그대로 씁니다. 비어 있으면 같은 `GEMINI_API_KEY`로 `gemini-nano-banana-2.1`에 1K 정사각형을 요청한 뒤 320×320 JPEG로 줄여 `public/images/<짧은-영문-이름>.jpg`에 저장하고, post-meta `cover`에 넣습니다. 키가 없거나 이미지 생성이 실패하면 글 파일을 쓰지 않습니다. `--dry-run`은 이미지 API를 호출하지 않고, 표지를 만들 예정이라고만 출력합니다. `--push`는 글 HTML과 이번에 만든 JPEG를 함께 커밋합니다.
+### 분류
 
-설명문은 본문 첫 소제목 앞의 두 문장입니다. 관련 글을 지정하지 않으면 이미 있는 글 중 최신 3개의 `/posts/<slug>/` 링크를 넣습니다.
+분류는 글의 목적에 따라 아래 아홉 가지 중 하나만 고릅니다. 1단계가 키워드를 담아 둔 통 이름(`realtime_trending`, `fallback_sample`)은 분류가 아닙니다.
+
+| 분류 | 어떤 글인가 |
+| --- | --- |
+| 교육 | 입학, 학교, 입시, 사관학교 |
+| 건강 | 증상, 예방, 의학 정보 |
+| 과학 | 원리나 현상의 설명. 건강 조언과 구분합니다 |
+| IT | 앱, 소프트웨어, 디지털 기기 |
+| 부동산 | 매매, 전세, 청약, 시세. 지원금 신청은 정부혜택입니다 |
+| 정부혜택 | 지원금, 바우처, 혜택 신청. 예: 청년 월세 지원금 |
+| 세금 | 연말정산, 공제, 신고 |
+| 정책·제도 | 위에 속하지 않는 공식 규정이나 행정 기준 |
+| 생활정보 | 일상·소비 정보. 예: 스타벅스 |
+
+`publish.py`의 `--category`와 front matter `category`가 이 목록 밖이면 글을 만들지 않습니다. 사이트 post-meta의 `category`도 같은 목록만 받습니다.
+
+설명문은 본문 첫 소제목 앞의 두 문장입니다. 관련 글을 `--related`나 front matter `related`로 적으면 그 목록을 그대로 씁니다. 적지 않으면 같은 분류의 다른 글 중 최신 3개의 `/posts/<slug>/` 링크를 넣습니다. 같은 분류 글이 하나라도 있으면 그 글만 넣고, 다른 분류로 채우지 않습니다. 같은 분류 글이 하나도 없을 때만 다른 분류의 최신 글 최대 3개로 대신합니다. 지금 올리는 글은 빼며, 추천 툴 링크는 자동으로 넣지 않습니다.
+
+표지는 `--cover /images/name.jpg` 또는 front matter `cover`가 있으면 그 경로를 그대로 씁니다. 비어 있으면 같은 `GEMINI_API_KEY`로 `gemini-nano-banana-2.1`에 1K 정사각형을 요청한 뒤 320×320 JPEG로 줄여 `public/images/<짧은-영문-이름>.jpg`에 저장하고, post-meta `cover`에 넣습니다. 키가 없거나 이미지 생성이 실패하면 글 파일을 쓰지 않습니다. `--dry-run`은 이미지 API를 호출하지 않고, 표지를 만들 예정이라고만 출력합니다. `--push`는 글 HTML과 이번에 만든 JPEG를 함께 커밋합니다.
 
 `.github/workflows/publish_post.yml`은 수동 실행만 됩니다. 기본값은 `dry_run: true`, `push: false`입니다.
 
 ## 키워드 선별
 
-`.github/workflows/keyword_selector.yml`이 매일 한국시간 06:00에 `main.py`를 실행합니다. Actions에서 수동 실행도 됩니다. `GEMINI_API_KEY` 시크릿이 필요합니다.
+`.github/workflows/keyword_selector.yml`이 매일 한국시간 06:00에 `main.py`를 실행합니다. Actions에서 수동 실행도 됩니다. `GEMINI_API_KEY` 시크릿이 필요합니다. 고른 키워드의 category는 위 아홉 가지 중 하나입니다. 기준은 그 키워드로 쓸 글의 목적이고, 트렌드 수집 통 이름이 아닙니다. 허용 목록 밖이면 1단계가 실패합니다.
 
 로컬 실행:
 

@@ -9,6 +9,8 @@ import xml.etree.ElementTree as ET
 import google.generativeai as genai
 from google.api_core.exceptions import ResourceExhausted
 
+import publish
+
 # 1. 제미니 API 설정 (깃허브 Secrets에서 전달받음)
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 if not GEMINI_API_KEY:
@@ -145,6 +147,7 @@ def select_best_longtail_with_gemini(keywords_pool):
     """
     [3&4단계: 제미니 1차 판사]
     카테고리를 불문하고 오늘 작성 시 팩트 퀄리티와 SEO 유효기간이 가장 미친 1개 키워드 최종 픽.
+    category는 키워드 수집 통이 아니라, 그 키워드로 쓸 글의 목적에 따라 허용된 아홉 가지 중 하나다.
     분당 429는 약 1분(서버 안내가 더 길면 그 시간) 기다린 뒤 딱 한 번만 다시 호출한다.
     """
     print("🤖 [3~4단계] 제미니 API가 전체 카테고리 중 최적의 1개 롱테일 최종 낙점 중...")
@@ -160,11 +163,15 @@ def select_best_longtail_with_gemini(keywords_pool):
     [조건]
     1. 인물/가십/단발성 이슈는 절대 선택 금지.
     2. 최종 롱테일 제목은 구체적인 신체 증상, 정책 자격, 해결책 형태의 3~4단어 조합으로 다듬을 것.
-    3. 반드시 아래 JSON 형식으로만 응답할 것.
+    3. category는 키워드가 들어 있던 수집 통이 아니라, 그 키워드로 쓸 글의 목적에서 고른다.
+    4. 반드시 아래 JSON 형식으로만 응답할 것.
+
+    [분류]
+    {publish.category_selection_prompt()}
 
     JSON 형식:
     {{
-        "category": "선택한 카테고리 (예: 건강/정부혜택/IT생활 등)",
+        "category": "교육, 건강, 과학, IT, 부동산, 정부혜택, 세금, 정책·제도, 생활정보 중 정확히 하나",
         "selected_seed": "선택한 씨앗 키워드",
         "reason": "선택 이유 1줄 요약",
         "longtail_title": "최종 확정된 롱테일 블로그 제목"
@@ -190,7 +197,14 @@ def select_best_longtail_with_gemini(keywords_pool):
         print("🔁 Gemini 요청을 1회 재시도합니다.")
         response = _call_gemini(prompt)
 
-    return json.loads(response.text)
+    result = json.loads(response.text)
+    if not isinstance(result, dict):
+        raise ValueError("Gemini 응답이 JSON 객체가 아닙니다.")
+    try:
+        result["category"] = publish.validate_category(str(result.get("category") or ""))
+    except publish.PublishError as exc:
+        raise ValueError(str(exc)) from exc
+    return result
 
 if __name__ == "__main__":
     # 1. 수집
