@@ -54,12 +54,17 @@ jobs:
           test -f out/posts/2026-youth-rent-support/index.html
           test -f out/posts/starbucks-winter-frequency/index.html
           test -f out/posts/2026-year-end-tax-refund/index.html
+          test -f out/posts/sagwanhakgyo-sinchegeomsa-bulhapgyeok-gijungwa-ipsi-jiwonja-jaegeom-daecheobeop/index.html
           test -f out/sitemap.xml
+          grep -q 'sagwanhakgyo-sinchegeomsa-bulhapgyeok-gijungwa-ipsi-jiwonja-jaegeom-daecheobeop' out/sitemap.xml
           test -f out/robots.txt
+          test -f out/ads.txt
+          grep -qx 'google.com, pub-5854572232694460, DIRECT, f08c47fec0942fa0' out/ads.txt
+          test -f out/og-default.png
+          test -f out/logo.png
           printf '%s\n' 'blog.mymallow.cloud' > out/CNAME
           grep -qx 'blog.mymallow.cloud' out/CNAME
           touch out/.nojekyll
-          test ! -f out/ads.txt
           test ! -f out/main.py
           test ! -f out/requirements.txt
           grep -q 'https://fieldtrip.mymallow.cloud/' out/posts/2026-youth-rent-support/index.html

@@ -1,23 +1,32 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
+import { ADSENSE_ACCOUNT, defaultOgImage, SITE_DESCRIPTION, SITE_NAME, SITE_URL } from "@/lib/site";
 import "./globals.css";
 
-const description = "매일 업데이트되는 핵심 정책 & 생활 꿀팁 족보";
-
 export const metadata: Metadata = {
-  metadataBase: new URL("https://blog.mymallow.cloud"),
+  metadataBase: new URL(SITE_URL),
   title: {
-    default: "Mallow Info Lab",
-    template: "%s · Mallow Info Lab",
+    default: SITE_NAME,
+    template: `%s · ${SITE_NAME}`,
   },
-  description,
+  description: SITE_DESCRIPTION,
+  other: {
+    "google-adsense-account": ADSENSE_ACCOUNT,
+  },
   openGraph: {
     type: "website",
     locale: "ko_KR",
-    siteName: "Mallow Info Lab",
-    title: "Mallow Info Lab",
-    description,
+    siteName: SITE_NAME,
+    title: SITE_NAME,
+    description: SITE_DESCRIPTION,
     url: "/",
+    images: [defaultOgImage],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: SITE_NAME,
+    description: SITE_DESCRIPTION,
+    images: [{ url: defaultOgImage.url, alt: defaultOgImage.alt }],
   },
 };
 

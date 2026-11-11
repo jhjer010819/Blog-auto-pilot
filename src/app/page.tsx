@@ -1,11 +1,31 @@
+import type { Metadata } from "next";
 import { ArticleCard } from "@/components/article-card";
 import { getPosts } from "@/lib/posts";
+import { publisherOrganization, serializeJsonLd, SITE_DESCRIPTION, SITE_NAME, SITE_URL } from "@/lib/site";
+
+export const metadata: Metadata = {
+  alternates: { canonical: `${SITE_URL}/` },
+};
+
+const websiteJsonLd = {
+  "@context": "https://schema.org",
+  "@type": "WebSite",
+  name: SITE_NAME,
+  url: `${SITE_URL}/`,
+  description: SITE_DESCRIPTION,
+  inLanguage: "ko-KR",
+  publisher: publisherOrganization(),
+};
 
 export default function HomePage() {
   const posts = getPosts();
 
   return (
     <main className="min-h-screen bg-[#f4f6fb]">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: serializeJsonLd(websiteJsonLd) }}
+      />
       <div className="mx-auto w-full max-w-[720px] px-4 py-6 sm:px-6 sm:py-12">
         <header className="overflow-hidden rounded-[22px] bg-white shadow-[0_10px_40px_rgba(22,34,61,0.06)]">
           <div className="h-[5px] bg-[#2f6bff]" />
