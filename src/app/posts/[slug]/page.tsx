@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { AdSlot } from "@/components/ad-slot";
 import { RelatedLinks } from "@/components/related-links";
 import { formatPublishedDate, seoulDateTime } from "@/lib/format";
 import { localImageSize } from "@/lib/image-size";
@@ -135,13 +134,7 @@ export default async function PostPage({ params }: PostPageProps) {
         <p className="mt-3 text-[14px] text-[#9aa3b5]">
           발행일: <time dateTime={published}>{formatPublishedDate(post.date)}</time>
         </p>
-        <div className="mt-8">
-          <AdSlot position="top" />
-        </div>
         <div className="post-body mt-8" dangerouslySetInnerHTML={{ __html: post.html }} />
-        <div className="mt-10">
-          <AdSlot position="bottom" />
-        </div>
         {post.links.length > 0 ? (
           <div className="mt-8">
             <RelatedLinks links={post.links} />

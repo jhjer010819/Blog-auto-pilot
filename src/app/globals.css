@@ -33,26 +33,6 @@ a:focus-visible {
   border-radius: 8px;
 }
 
-.ad-slot {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 74px;
-  border-radius: 16px;
-  border: 1px dashed #d5dce8;
-  background: #f7f9fc;
-  color: #9aa3b5;
-  font-size: 14px;
-  letter-spacing: -0.01em;
-}
-
-.ad-slot-live {
-  display: block;
-  min-height: 0;
-  border: 0;
-  background: transparent;
-}
-
 .post-body {
   color: #1f2937;
   font-size: 16.5px;
