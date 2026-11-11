@@ -1,0 +1,62 @@
+# Publishes site/ with GitHub Actions Pages. Does not use a gh-pages branch
+# and does not run the keyword pipeline.
+# One-time repo setting: Settings → Pages → Source: GitHub Actions.
+# The published artifact includes CNAME (blog.mymallow.cloud).
+name: Deploy GitHub Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "site/**"
+      - ".github/workflows/deploy-pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Assemble site
+        run: |
+          rm -rf dist
+          mkdir dist
+          cp -a site/. dist/
+          test -f dist/index.html
+          test -f dist/404.html
+          test -f dist/about.html
+          test -f dist/contact.html
+          test -f dist/posts/index.html
+          test -f dist/CNAME
+          grep -qx 'blog.mymallow.cloud' dist/CNAME
+          touch dist/.nojekyll
+          test ! -f dist/main.py
+          test ! -f dist/requirements.txt
+          test ! -f dist/ads.txt
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
