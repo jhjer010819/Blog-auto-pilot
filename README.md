@@ -80,6 +80,8 @@ python publish.py path/to/post.md --category 정부혜택 --push
 
 경로를 생략하면 `inbox/post.md`를 읽습니다. `--polish`는 `GEMINI_API_KEY`가 있을 때 `gemini-3.8-flash`로 문체만 다듬습니다. 숫자, 제목, 표의 행, 의학·정책 고지, 공백 포함 1800~2500자 범위가 깨지면 파일을 쓰지 않습니다. `--push`를 주지 않으면 커밋과 푸시를 하지 않고, 강제 푸시도 하지 않습니다.
 
+표지는 `--cover /images/name.jpg` 또는 front matter `cover`가 있으면 그 경로를 그대로 씁니다. 비어 있으면 같은 `GEMINI_API_KEY`로 `gemini-nano-banana-2.1`에 1K 정사각형을 요청한 뒤 320×320 JPEG로 줄여 `public/images/<짧은-영문-이름>.jpg`에 저장하고, post-meta `cover`에 넣습니다. 키가 없거나 이미지 생성이 실패하면 글 파일을 쓰지 않습니다. `--dry-run`은 이미지 API를 호출하지 않고, 표지를 만들 예정이라고만 출력합니다. `--push`는 글 HTML과 이번에 만든 JPEG를 함께 커밋합니다.
+
 설명문은 본문 첫 소제목 앞의 두 문장입니다. 관련 글을 지정하지 않으면 이미 있는 글 중 최신 3개의 `/posts/<slug>/` 링크를 넣습니다.
 
 `.github/workflows/publish_post.yml`은 수동 실행만 됩니다. 기본값은 `dry_run: true`, `push: false`입니다.
