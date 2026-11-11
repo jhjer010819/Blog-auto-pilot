@@ -36,7 +36,7 @@ npm run dev
 <p>본문 HTML입니다. h2, 목록, 인용만 적어도 페이지 껍데기는 사이트가 붙입니다.</p>
 ```
 
-봇이 넣는 것은 본문뿐입니다. 홈으로 돌아가기, 제목, 발행일, 광고 자리, “함께 읽으면 유용한 정보”는 템플릿이 붙입니다.
+봇이 넣는 것은 본문뿐입니다. 홈으로 돌아가기, 제목, 발행일, “함께 읽으면 유용한 정보”는 템플릿이 붙입니다.
 
 - `date`는 `YYYY-MM-DD`
 - `thumbnail`은 `public/images`에 둔 파일의 경로(`/images/...`)이거나 `https` 주소
@@ -60,7 +60,7 @@ GitHub Pages 배포는 `.github/workflows/deploy-pages.yml`입니다.
 - 저장소 Pages 소스는 **GitHub Actions**여야 합니다. 한 번만 설정하면 이후 `main` 병합이 사이트를 갱신합니다.
 - DNS는 별도입니다. `blog.mymallow.cloud` CNAME을 `jhjer010819.github.io`로 두고, Cloudflare 프록시는 끕니다.
 
-광고 자리는 `NEXT_PUBLIC_ADSENSE_CLIENT`(`ca-pub-`로 시작), `NEXT_PUBLIC_ADSENSE_SLOT_TOP`, `NEXT_PUBLIC_ADSENSE_SLOT_BOTTOM`이 있을 때만 애드센스로 바뀝니다. 없으면 시안의 자리 표시가 남습니다. `public/ads.txt`는 정적 내보내기 루트의 `ads.txt`가 되어 `https://blog.mymallow.cloud/ads.txt`로 게시됩니다. 애드센스 스크립트는 이 파일만으로 붙지 않습니다.
+`public/ads.txt`는 정적 내보내기 루트의 `ads.txt`가 되어 `https://blog.mymallow.cloud/ads.txt`로 게시됩니다. 애드센스 스크립트는 이 파일만으로 붙지 않습니다.
 
 표지용 글꼴은 [Pretendard](https://github.com/orioncactus/pretendard) (SIL Open Font License)입니다. 라이선스 원문은 `public/fonts/LICENSE`에 있습니다.
 
