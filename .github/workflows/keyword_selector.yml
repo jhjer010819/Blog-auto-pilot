@@ -8,6 +8,7 @@ on:
 jobs:
   run-keyword-pipeline:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: 깃허브 저장소 코드 가져오기
         uses: actions/checkout@v3
