@@ -1,0 +1,82 @@
+name: 3호 블로그 2단계 글 게시
+
+on:
+  workflow_dispatch:
+    inputs:
+      markdown_path:
+        description: "저장소 안의 마크다운 경로"
+        required: true
+        default: "examples/fixture-post.md"
+      category:
+        description: "글 분류 (예: 건강, 정책)"
+        required: true
+        default: "예시"
+      slug:
+        description: "파일명 슬러그. 비우면 마크다운에서 정합니다."
+        required: false
+        default: ""
+      polish:
+        description: "Gemini로 문체만 다듬기"
+        type: boolean
+        default: false
+      dry_run:
+        description: "파일을 쓰지 않고 검증만 하기"
+        type: boolean
+        default: true
+      push:
+        description: "만든 글 파일을 현재 브랜치에 커밋하고 푸시"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  publish-post:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 저장소 가져오기
+        uses: actions/checkout@v4
+
+      - name: 파이썬 3.10 설정
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: 라이브러리 설치
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: 게시 스크립트 검증
+        run: python -m unittest discover -s tests -v
+
+      - name: 글 파일 생성
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          MARKDOWN_PATH: ${{ inputs.markdown_path }}
+          CATEGORY: ${{ inputs.category }}
+          SLUG: ${{ inputs.slug }}
+          DO_POLISH: ${{ inputs.polish }}
+          DO_DRY_RUN: ${{ inputs.dry_run }}
+          DO_PUSH: ${{ inputs.push }}
+        run: |
+          set -eu
+          if [ "$DO_DRY_RUN" = "true" ] && [ "$DO_PUSH" = "true" ]; then
+            echo "dry_run과 push는 함께 사용할 수 없습니다." >&2
+            exit 1
+          fi
+          cmd=(python publish.py "$MARKDOWN_PATH" --category "$CATEGORY")
+          if [ -n "$SLUG" ]; then
+            cmd+=(--slug "$SLUG")
+          fi
+          if [ "$DO_POLISH" = "true" ]; then
+            cmd+=(--polish)
+          fi
+          if [ "$DO_DRY_RUN" = "true" ]; then
+            cmd+=(--dry-run)
+          fi
+          if [ "$DO_PUSH" = "true" ]; then
+            cmd+=(--push)
+          fi
+          "${cmd[@]}"
