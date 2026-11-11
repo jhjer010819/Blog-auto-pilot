@@ -1,14 +1,21 @@
-# Publishes site/ with GitHub Actions Pages. Does not use a gh-pages branch
-# and does not run the keyword pipeline.
+# Publishes the Next.js static export with GitHub Actions Pages.
+# Does not use a gh-pages branch and does not run the keyword pipeline.
 # One-time repo setting: Settings → Pages → Source: GitHub Actions.
-# The published artifact includes CNAME (blog.mymallow.cloud).
+# The published artifact is out/ and includes CNAME (blog.mymallow.cloud).
 name: Deploy GitHub Pages
 
 on:
   push:
     branches: [main]
     paths:
-      - "site/**"
+      - "src/**"
+      - "content/**"
+      - "public/**"
+      - "package.json"
+      - "package-lock.json"
+      - "next.config.ts"
+      - "tsconfig.json"
+      - "eslint.config.mjs"
       - ".github/workflows/deploy-pages.yml"
   workflow_dispatch:
 
@@ -28,27 +35,47 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Assemble site
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Export static site
+        run: npm run export
+
+      - name: Prepare Pages output
         run: |
-          rm -rf dist
-          mkdir dist
-          cp -a site/. dist/
-          test -f dist/index.html
-          test -f dist/404.html
-          test -f dist/about.html
-          test -f dist/contact.html
-          test -f dist/posts/index.html
-          test -f dist/CNAME
-          grep -qx 'blog.mymallow.cloud' dist/CNAME
-          touch dist/.nojekyll
-          test ! -f dist/main.py
-          test ! -f dist/requirements.txt
-          test ! -f dist/ads.txt
+          test -f out/index.html
+          test -f out/404.html
+          test -f out/posts/2026-youth-rent-support/index.html
+          test -f out/posts/starbucks-winter-frequency/index.html
+          test -f out/posts/2026-year-end-tax-refund/index.html
+          test -f out/sitemap.xml
+          test -f out/robots.txt
+          printf '%s\n' 'blog.mymallow.cloud' > out/CNAME
+          grep -qx 'blog.mymallow.cloud' out/CNAME
+          touch out/.nojekyll
+          test ! -f out/ads.txt
+          test ! -f out/main.py
+          test ! -f out/requirements.txt
+          grep -q 'https://fieldtrip.mymallow.cloud/' out/posts/2026-youth-rent-support/index.html
+          if grep -R -n --binary-files=without-match 'blog\.mallow\.cloud' out; then
+            echo "found blog.mallow.cloud in the export"
+            exit 1
+          fi
+          if grep -R -n --binary-files=without-match 'https://mallow\.cloud' out; then
+            echo "found https://mallow.cloud in the export"
+            exit 1
+          fi
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: dist
+          path: out
 
   deploy:
     needs: build

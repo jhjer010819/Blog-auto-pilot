@@ -1,0 +1,164 @@
+@import "tailwindcss";
+@import "./pretendard.css";
+
+:root {
+  color-scheme: light;
+  --paper: #f4f6fb;
+  --ink: #16181d;
+  --muted: #8b95a7;
+  --line: #e6ebf3;
+  --accent: #2f6bff;
+}
+
+html {
+  background: var(--paper);
+}
+
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: "Pretendard Variable", Pretendard, "Apple SD Gothic Neo", "Noto Sans KR",
+    "Malgun Gothic", sans-serif;
+  word-break: keep-all;
+  overflow-wrap: break-word;
+}
+
+::selection {
+  background: #d9e6ff;
+}
+
+a:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 8px;
+}
+
+.ad-slot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 74px;
+  border-radius: 16px;
+  border: 1px dashed #d5dce8;
+  background: #f7f9fc;
+  color: #9aa3b5;
+  font-size: 14px;
+  letter-spacing: -0.01em;
+}
+
+.ad-slot-live {
+  display: block;
+  min-height: 0;
+  border: 0;
+  background: transparent;
+}
+
+.post-body {
+  color: #1f2937;
+  font-size: 16.5px;
+  line-height: 1.85;
+}
+
+.post-body > * + * {
+  margin-top: 1.05rem;
+}
+
+.post-body h2 {
+  margin-top: 2.1rem;
+  color: var(--ink);
+  font-size: 1.22rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1.45;
+}
+
+.post-body h3 {
+  margin-top: 1.6rem;
+  color: var(--ink);
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.post-body ul,
+.post-body ol {
+  padding-left: 1.2rem;
+}
+
+.post-body ul {
+  list-style: disc;
+}
+
+.post-body ol {
+  list-style: decimal;
+}
+
+.post-body li + li {
+  margin-top: 0.45rem;
+}
+
+.post-body a[href] {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.post-body strong {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.post-body blockquote {
+  border-left: 3px solid var(--accent);
+  background: #f4f7fb;
+  border-radius: 0 14px 14px 0;
+  padding: 0.95rem 1.05rem;
+  color: #526072;
+  font-size: 0.95rem;
+  line-height: 1.7;
+}
+
+.post-body img {
+  width: 100%;
+  height: auto;
+  border-radius: 14px;
+}
+
+.post-body hr {
+  border: 0;
+  border-top: 1px solid var(--line);
+}
+
+.post-body code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.92em;
+  background: #f3f5f9;
+  padding: 0.1em 0.35em;
+  border-radius: 6px;
+}
+
+.post-body pre {
+  overflow-x: auto;
+  background: #f3f5f9;
+  padding: 0.9rem 1rem;
+  border-radius: 12px;
+}
+
+.post-body pre code {
+  background: transparent;
+  padding: 0;
+}
+
+.post-body table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.95rem;
+}
+
+.post-body th,
+.post-body td {
+  border-bottom: 1px solid var(--line);
+  padding: 0.55rem 0.4rem;
+  text-align: left;
+  vertical-align: top;
+}
