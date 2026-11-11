@@ -4,6 +4,18 @@ import { excerptFromHtml, sanitizePostHtml } from "./html";
 
 const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const POSTS_DIR = path.join(process.cwd(), "content", "posts");
+const ALLOWED_CATEGORIES = [
+  "교육",
+  "건강",
+  "과학",
+  "IT",
+  "부동산",
+  "정부혜택",
+  "세금",
+  "정책·제도",
+  "생활정보",
+] as const;
+const ALLOWED_CATEGORY_SET = new Set<string>(ALLOWED_CATEGORIES);
 
 export type PostLink = {
   title: string;
@@ -131,7 +143,7 @@ function assertMeta(fileName: string, value: unknown): CleanMeta {
   }
   const meta = value as Record<string, unknown>;
   const title = requiredString(fileName, meta.title, "title", 160);
-  const category = requiredString(fileName, meta.category, "category", 24);
+  const category = requiredCategory(fileName, meta.category);
   const date = requiredString(fileName, meta.date, "date", 10);
   if (!isRealDate(date)) {
     throw new Error(`${fileName}: date는 YYYY-MM-DD 형식의 실제 날짜여야 합니다.`);
@@ -246,6 +258,16 @@ function isSafeThumbnail(src: string) {
   } catch {
     return false;
   }
+}
+
+function requiredCategory(fileName: string, value: unknown) {
+  const category = requiredString(fileName, value, "category", 24);
+  if (!ALLOWED_CATEGORY_SET.has(category)) {
+    throw new Error(
+      `${fileName}: category는 다음 중 하나여야 합니다. ${ALLOWED_CATEGORIES.join(", ")}`,
+    );
+  }
+  return category;
 }
 
 function requiredString(fileName: string, value: unknown, field: string, max: number) {

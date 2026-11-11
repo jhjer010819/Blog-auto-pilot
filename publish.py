@@ -5,6 +5,9 @@
 홈 링크, 제목, 날짜, 「함께 읽으면 유용한 정보」는 사이트가 붙입니다.
 공개 주소는 https://blog.mymallow.cloud/posts/<slug>/ 입니다.
 cover가 비어 있으면 게시 때 320×320 JPEG 표지를 만들어 public/images에 저장합니다.
+분류는 교육, 건강, 과학, IT, 부동산, 정부혜택, 세금, 정책·제도, 생활정보 중 하나입니다.
+관련 글을 지정하지 않으면 같은 분류의 다른 글을 최신순으로 최대 3개 고릅니다.
+같은 분류 글이 없을 때만 다른 분류의 최신 글로 대신합니다.
 
     <script type="application/json" id="post-meta">
     {
@@ -41,6 +44,29 @@ META_SCRIPT_ID = "post-meta"
 REQUIRED_META_KEYS = ("title", "category", "date", "cover", "related")
 OPTIONAL_META_KEYS = frozenset({"description"})
 RELATED_LIMIT = 3
+# 글의 목적으로 고르는 닫힌 분류. 1단계 트렌드 통 이름(realtime_trending 등)은 분류가 아니다.
+ALLOWED_CATEGORIES = (
+    "교육",
+    "건강",
+    "과학",
+    "IT",
+    "부동산",
+    "정부혜택",
+    "세금",
+    "정책·제도",
+    "생활정보",
+)
+CATEGORY_PURPOSES = {
+    "교육": "입학, 학교, 입시, 사관학교",
+    "건강": "증상, 예방, 의학 정보",
+    "과학": "원리나 현상의 설명. 건강 조언과 구분한다",
+    "IT": "앱, 소프트웨어, 디지털 기기",
+    "부동산": "매매, 전세, 청약, 시세. 지원금 신청은 여기에 넣지 않는다",
+    "정부혜택": "지원금, 바우처, 혜택 신청. 예: 청년 월세 지원금",
+    "세금": "연말정산, 공제, 신고",
+    "정책·제도": "위에 속하지 않는 공식 규정이나 행정 기준",
+    "생활정보": "일상·소비 정보. 예: 스타벅스",
+}
 MIN_BODY_CHARS = 1800
 MAX_BODY_CHARS = 2500
 DESCRIPTION_TARGET = 120
@@ -102,7 +128,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         nargs="?",
         help=f"마크다운 경로. 생략하면 {{root}}/{DEFAULT_INPUT.as_posix()}",
     )
-    parser.add_argument("--category", help="글 분류. front matter category 보다 우선합니다.")
+    parser.add_argument(
+        "--category",
+        help=(
+            "글 분류. 교육, 건강, 과학, IT, 부동산, 정부혜택, 세금, 정책·제도, 생활정보 중 하나. "
+            "front matter category 보다 우선합니다."
+        ),
+    )
     parser.add_argument("--slug", help="content/posts 파일 이름. 확장자는 붙이지 않습니다.")
     parser.add_argument("--date", help="게시 날짜 YYYY-MM-DD. 기본값은 한국 표준시 오늘입니다.")
     parser.add_argument(
@@ -175,6 +207,7 @@ def publish(args: argparse.Namespace) -> Path | None:
     category = (args.category or front_matter.get("category") or "").strip()
     if not category:
         raise PublishError("분류가 없습니다. --category 또는 front matter의 category를 지정하세요.")
+    category = validate_category(category)
     date = validate_date(args.date or str(front_matter.get("date") or "") or today_kst())
     requested_slug = (args.slug or str(front_matter.get("slug") or "")).strip()
     if requested_slug:
@@ -193,7 +226,7 @@ def publish(args: argparse.Namespace) -> Path | None:
         if not body.strip():
             raise PublishError("문체 다듬기 뒤 본문이 비었습니다.")
 
-    related = resolve_related(args, front_matter, root, slug)
+    related = resolve_related(args, front_matter, root, slug, category)
     body_html = markdown_to_html(body)
     if not body_html.strip():
         raise PublishError("마크다운을 HTML로 바꾸지 못했습니다.")
@@ -426,11 +459,36 @@ def ensure_unique_slug(root: Path, slug: str, title: str) -> str:
     return candidate
 
 
+def validate_category(value: str) -> str:
+    category = value.strip()
+    if category not in ALLOWED_CATEGORIES:
+        allowed = ", ".join(ALLOWED_CATEGORIES)
+        shown = category or "(빈 값)"
+        raise PublishError(f"분류는 허용 목록 중 하나여야 합니다: {shown}. 허용: {allowed}")
+    return category
+
+
+def category_selection_prompt() -> str:
+    """1단계 제미니 프롬프트에 넣는 분류 규칙.
+
+    분류는 키워드 수집 통이 아니라, 그 키워드로 쓸 글의 목적에서 고른다.
+    """
+    lines = [
+        "category는 아래 아홉 가지 중 정확히 하나만 쓴다.",
+        "기준은 그 키워드로 쓸 글의 목적이다. "
+        "구글 트렌드 키워드를 담아 둔 통 이름(realtime_trending, fallback_sample 등)을 category로 쓰지 않는다.",
+    ]
+    for name in ALLOWED_CATEGORIES:
+        lines.append(f"- {name}: {CATEGORY_PURPOSES[name]}")
+    return "\n".join(lines)
+
+
 def resolve_related(
     args: argparse.Namespace,
     front_matter: dict,
     root: Path,
     slug: str,
+    category: str,
 ) -> list[dict[str, str]]:
     if args.no_related:
         return []
@@ -442,7 +500,7 @@ def resolve_related(
             raise PublishError("front matter related 형식이 잘못되었습니다.")
         return normalize_related(raw_related)
     existing = load_existing_posts(root / POSTS_DIR)
-    return auto_related(existing, slug)
+    return auto_related(existing, slug, category)
 
 
 def parse_related_arg(value: str) -> dict[str, str]:
@@ -495,17 +553,32 @@ def load_existing_posts(posts_dir: Path) -> list[dict[str, str]]:
         if not title or not _DATE_RE.fullmatch(date):
             print(f"기존 글 메타가 불완전합니다: {path.name}", file=sys.stderr)
             continue
-        posts.append({"slug": path.stem, "title": title, "date": date})
+        posts.append(
+            {
+                "slug": path.stem,
+                "title": title,
+                "date": date,
+                "category": str(meta.get("category") or "").strip(),
+            }
+        )
     return posts
 
 
-def auto_related(posts: list[dict[str, str]], slug: str) -> list[dict[str, str]]:
+def auto_related(posts: list[dict[str, str]], slug: str, category: str) -> list[dict[str, str]]:
+    """같은 분류의 다른 글을 최신순으로 최대 RELATED_LIMIT개 고른다.
+
+    같은 분류 글이 하나라도 있으면 그 글만 반환하고 다른 분류로 채우지 않는다.
+    같은 분류 글이 전혀 없을 때만 다른 분류의 최신 글로 대신한다.
+    추천 툴·외부 CTA는 넣지 않고, 글 자체만 가리킨다.
+    """
     others = [post for post in posts if post["slug"] != slug]
-    others.sort(key=lambda post: post["slug"])
-    others.sort(key=lambda post: post["date"], reverse=True)
+    same = [post for post in others if post.get("category") == category]
+    chosen = same if same else others
+    chosen.sort(key=lambda post: post["slug"])
+    chosen.sort(key=lambda post: post["date"], reverse=True)
     return [
         {"title": post["title"], "href": f"/posts/{post['slug']}/"}
-        for post in others[:RELATED_LIMIT]
+        for post in chosen[:RELATED_LIMIT]
     ]
 
 

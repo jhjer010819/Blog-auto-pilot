@@ -8,9 +8,9 @@ on:
         required: true
         default: "examples/fixture-post.md"
       category:
-        description: "글 분류 (예: 건강, 정책)"
+        description: "허용 분류 중 하나: 교육, 건강, 과학, IT, 부동산, 정부혜택, 세금, 정책·제도, 생활정보"
         required: true
-        default: "예시"
+        default: "생활정보"
       slug:
         description: "파일명 슬러그. 비우면 마크다운에서 정합니다."
         required: false
