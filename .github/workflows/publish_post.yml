@@ -19,6 +19,10 @@ on:
         description: "Gemini로 문체만 다듬기"
         type: boolean
         default: false
+      cover:
+        description: "표지 경로. 비우면 제목과 분류로 320×320 표지를 만듭니다."
+        required: false
+        default: ""
       dry_run:
         description: "파일을 쓰지 않고 검증만 하기"
         type: boolean
@@ -38,10 +42,10 @@ jobs:
       - name: 저장소 가져오기
         uses: actions/checkout@v4
 
-      - name: 파이썬 3.10 설정
+      - name: 파이썬 3.12 설정
         uses: actions/setup-python@v5
         with:
-          python-version: "3.10"
+          python-version: "3.12"
 
       - name: 라이브러리 설치
         run: |
@@ -57,6 +61,7 @@ jobs:
           MARKDOWN_PATH: ${{ inputs.markdown_path }}
           CATEGORY: ${{ inputs.category }}
           SLUG: ${{ inputs.slug }}
+          COVER: ${{ inputs.cover }}
           DO_POLISH: ${{ inputs.polish }}
           DO_DRY_RUN: ${{ inputs.dry_run }}
           DO_PUSH: ${{ inputs.push }}
@@ -69,6 +74,9 @@ jobs:
           cmd=(python publish.py "$MARKDOWN_PATH" --category "$CATEGORY")
           if [ -n "$SLUG" ]; then
             cmd+=(--slug "$SLUG")
+          fi
+          if [ -n "$COVER" ]; then
+            cmd+=(--cover "$COVER")
           fi
           if [ "$DO_POLISH" = "true" ]; then
             cmd+=(--polish)
