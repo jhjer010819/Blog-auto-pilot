@@ -1,0 +1,86 @@
+{
+  "replacements": [
+    {"term": "상속개시 있음을 안 날", "suggestion": "상속이 시작된 것을 안 날"},
+    {"term": "장제를 실시한 사람", "suggestion": "장례를 치른 사람"},
+    {"term": "신고 의무자", "suggestion": "신고할 사람"},
+    {"term": "신고의무자", "suggestion": "신고할 사람"},
+    {"term": "납부의무자", "suggestion": "내야 하는 사람"},
+    {"term": "과세관청", "suggestion": "세무서"},
+    {"term": "기 납부", "suggestion": "이미 낸"},
+    {"term": "기납부", "suggestion": "이미 낸"},
+    {"term": "경과 시", "suggestion": "지나면"},
+    {"term": "부과됩니다", "suggestion": "나옵니다"},
+    {"term": "부과된다", "suggestion": "나온다"},
+    {"term": "당해연도", "suggestion": "그 해"},
+    {"term": "하기 위하여", "suggestion": "하려고"},
+    {"term": "함에 있어", "suggestion": "할 때"},
+    {"term": "의거하여", "suggestion": "따라"},
+    {"term": "갈음하여", "suggestion": "대신하여"},
+    {"term": "소급하여", "suggestion": "거슬러"},
+    {"term": "준용한다", "suggestion": "같이 적용한다"},
+    {"term": "간주한다", "suggestion": "같은 것으로 본다"},
+    {"term": "각하한다", "suggestion": "받아들이지 않는다"},
+    {"term": "기각한다", "suggestion": "받아들이지 않는다"},
+    {"term": "취하한다", "suggestion": "취소한다"},
+    {"term": "의제한다", "suggestion": "그렇다고 본다"},
+    {"term": "지체 없이", "suggestion": "바로"},
+    {"term": "에 의하여", "suggestion": "에 따라"},
+    {"term": "에 있어서", "suggestion": "에서"},
+    {"term": "1구당", "suggestion": "1명당"},
+    {"term": "기산점", "suggestion": "시작하는 날"},
+    {"term": "기산일", "suggestion": "시작하는 날"},
+    {"term": "기준일", "suggestion": "마감 날짜"},
+    {"term": "출발점", "suggestion": "시작하는 날"},
+    {"term": "소정의", "suggestion": "정해진"},
+    {"term": "신청인", "suggestion": "신청한 사람"},
+    {"term": "득하다", "suggestion": "얻다"},
+    {"term": "하여야", "suggestion": "해야"},
+    {"term": "익월", "suggestion": "다음 달"},
+    {"term": "익일", "suggestion": "다음 날"},
+    {"term": "당해", "suggestion": "해당"},
+    {"term": "금번", "suggestion": "이번"},
+    {"term": "동법", "suggestion": "같은 법"},
+    {"term": "본건", "suggestion": "이 사건"},
+    {"term": "여하한", "suggestion": "어떤"},
+    {"term": "불응", "suggestion": "따르지 않음"},
+    {"term": "송달", "suggestion": "서류 도착"},
+    {"term": "추완", "suggestion": "나중에 보완"},
+    {"term": "해태", "suggestion": "미룸"},
+    {"term": "도과", "suggestion": "기간이 지남"},
+    {"term": "기산", "suggestion": "시작"},
+    {"term": "관서", "suggestion": "관청"},
+    {
+      "term": "상기",
+      "suggestion": "위의",
+      "not_followed_by": ["하", "시"]
+    },
+    {
+      "term": "요함",
+      "suggestion": "해야 함",
+      "not_preceded_by": ["필"]
+    },
+    {
+      "term": "최고",
+      "suggestion": "독촉",
+      "not_followed_by": ["속도", "속", "점", "치", "한도", "액", "금리", "온도", "법원", "재판", "기록"]
+    }
+  ],
+  "patterns": [
+    {
+      "pattern": "기준일이 다릅",
+      "suggestion": "기한을 며칠부터 세는지 항목마다 풀어 쓰세요"
+    },
+    {
+      "pattern": "출발점",
+      "suggestion": "시작하는 날"
+    },
+    {
+      "pattern": "제각각",
+      "suggestion": "항목마다 다릅니다"
+    },
+    {
+      "pattern": "경우에는.{0,40}?만 가능",
+      "suggestion": "직접 방문해서만 신청할 수 있습니다"
+    }
+  ]
+}

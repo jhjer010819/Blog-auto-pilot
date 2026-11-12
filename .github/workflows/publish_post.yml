@@ -35,6 +35,14 @@ on:
         description: "만든 글 파일을 현재 브랜치에 커밋하고 푸시"
         type: boolean
         default: false
+      plain_lang_strict:
+        description: "쉬운 말 검사에 걸리면 실패. 기본값은 경고만 하고 계속합니다."
+        type: boolean
+        default: false
+      gemini_polish_models:
+        description: "문체 다듬기 모델. 쉼표로 구분. 비우면 gemini-3.8-flash, gemini-3.6-flash, gemini-3.5-flash-lite"
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -60,7 +68,7 @@ jobs:
       - name: 게시 스크립트 검증
         run: |
           python -m unittest discover -s tests -v
-          python -m pytest tests/test_sentence_polish.py -q
+          python -m pytest tests/test_sentence_polish.py tests/test_plain_language.py -q
 
       - name: 글 파일 생성
         env:
@@ -73,6 +81,8 @@ jobs:
           POLISHED_PATH: ${{ inputs.polished_path }}
           DO_DRY_RUN: ${{ inputs.dry_run }}
           DO_PUSH: ${{ inputs.push }}
+          PLAIN_LANG_STRICT: ${{ inputs.plain_lang_strict }}
+          GEMINI_POLISH_MODELS: ${{ inputs.gemini_polish_models }}
         run: |
           set -eu
           if [ "$DO_DRY_RUN" = "true" ] && [ "$DO_PUSH" = "true" ]; then
@@ -102,6 +112,9 @@ jobs:
           fi
           if [ "$DO_PUSH" = "true" ]; then
             cmd+=(--push)
+          fi
+          if [ "$PLAIN_LANG_STRICT" = "true" ]; then
+            cmd+=(--plain-lang-strict)
           fi
           "${cmd[@]}"
 

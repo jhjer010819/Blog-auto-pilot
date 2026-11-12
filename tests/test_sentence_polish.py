@@ -203,9 +203,10 @@ def test_one_request_fallback_chain(capsys, monkeypatch) -> None:
     assert "POLISH_STATUS: ok model=gemini-3.6-flash applied=1 reverted=0" in capsys.readouterr().out
 
 
-def test_daily_quota_does_not_try_the_next_model(monkeypatch) -> None:
+def test_daily_quota_retries_fallback_once(monkeypatch) -> None:
     monkeypatch.setenv("GEMINI_API_KEY", "test-key")
     monkeypatch.delenv("GEMINI_MODELS", raising=False)
+    monkeypatch.delenv("GEMINI_POLISH_MODELS", raising=False)
     calls: list[str] = []
 
     class FakeModel:
@@ -221,7 +222,48 @@ def test_daily_quota_does_not_try_the_next_model(monkeypatch) -> None:
     monkeypatch.setattr(genai, "GenerativeModel", FakeModel)
     original = "# 제목\n\n원문 문장입니다.\n"
     assert publish.polish_markdown(original) == original
-    assert calls == ["gemini-3.8-flash"]
+    assert calls == ["gemini-3.8-flash", "gemini-3.6-flash"]
+
+
+def test_quota_429_uses_fallback_model_once(capsys, monkeypatch) -> None:
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    monkeypatch.setenv(
+        "GEMINI_POLISH_MODELS",
+        "gemini-3.8-flash, gemini-3.6-flash, gemini-3.5-flash-lite",
+    )
+    calls: list[str] = []
+
+    class ResourceExhausted(Exception):
+        def __init__(self) -> None:
+            super().__init__("429 RESOURCE_EXHAUSTED")
+            self.code = 429
+
+    class FakeResponse:
+        def __init__(self, text: str) -> None:
+            self.text = text
+
+    class FakeModel:
+        def __init__(self, name: str, system_instruction: str | None = None) -> None:
+            self.name = name
+            calls.append(name)
+
+        def generate_content(self, prompt: str, generation_config: dict | None = None) -> FakeResponse:
+            assert generation_config["response_mime_type"] == "application/json"
+            if self.name == "gemini-3.8-flash":
+                raise ResourceExhausted()
+            return FakeResponse(_reply(prompt, lambda text: text.replace("원문 문장", "다듬은 문장")))
+
+    import google.generativeai as genai
+
+    monkeypatch.setattr(genai, "configure", lambda api_key: None)
+    monkeypatch.setattr(genai, "GenerativeModel", FakeModel)
+    result = publish.polish_markdown("# 제목\n\n원문 문장입니다.\n")
+    assert calls == ["gemini-3.8-flash", "gemini-3.6-flash"]
+    assert "다듬은 문장입니다." in result
+    status = capsys.readouterr().out
+    assert "POLISH_STATUS: ok model=gemini-3.6-flash applied=1 reverted=0" in status
+    summary = json.loads(status.split("POLISH_SUMMARY: ", 1)[1].splitlines()[0])
+    assert summary["model"] == "gemini-3.6-flash"
 
 
 def test_adjacent_merge_and_rejected_merge(monkeypatch) -> None:
@@ -328,8 +370,15 @@ def test_missing_api_key_still_fails(monkeypatch) -> None:
 
 def test_default_model_order(monkeypatch) -> None:
     monkeypatch.delenv("GEMINI_MODELS", raising=False)
+    monkeypatch.delenv("GEMINI_POLISH_MODELS", raising=False)
     assert publish._polish_model_names() == (
         "gemini-3.8-flash",
         "gemini-3.6-flash",
         "gemini-3.5-flash-lite",
     )
+
+
+def test_polish_models_env_overrides_keyword_models(monkeypatch) -> None:
+    monkeypatch.setenv("GEMINI_MODELS", "gemini-3.5-flash-lite")
+    monkeypatch.setenv("GEMINI_POLISH_MODELS", "gemini-3.8-flash, gemini-3.6-flash")
+    assert publish._polish_model_names() == ("gemini-3.8-flash", "gemini-3.6-flash")

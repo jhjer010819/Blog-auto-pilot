@@ -79,7 +79,9 @@ python publish.py path/to/post.md --category 정부혜택 --polish
 python publish.py path/to/post.md --category 정부혜택 --push
 ```
 
-경로를 생략하면 `inbox/post.md`를 읽습니다. `--polish`는 선택입니다. `GEMINI_API_KEY`가 있을 때 본문 문장만 `gemini-3.8-flash`, `gemini-3.6-flash`, `gemini-3.5-flash-lite` 순으로 한 번 다듬습니다. 제목, 고지, 출처, 표, 코드, 굵은 라벨 줄은 모델에 보내지 않습니다. 숫자·고유명사·확실함·굵은 글씨가 바뀐 문장은 그 문장만 원문으로 되돌리고, 응답을 읽지 못하면 글 전체를 원문으로 둡니다. 표준 출력에 `POLISH_STATUS` 한 줄과 JSON 요약을 남깁니다. `--dry-run`과 함께 쓰면 그 다음에 다듬은 마크다운을 표시합니다. `--push`를 주지 않으면 커밋과 푸시를 하지 않고, 강제 푸시도 하지 않습니다.
+경로를 생략하면 `inbox/post.md`를 읽습니다. 게시할 때마다 본문의 공문서 말투를 검사합니다. `config/plain_language.json`의 용어는 쉬운 말로, 패턴은 추상 문장으로 표시합니다. 프론트매터, 출처, 표, 코드, 고지 문장은 빼며 제목은 포함합니다. 표준 출력에 `PLAIN_LANG_FLAGS` JSON 한 줄과 `PLAIN_LANG_STATUS: ok` 또는 `flags=N`을 남깁니다. 걸려도 게시는 계속됩니다. `--plain-lang-strict`를 주면 걸린 곳이 있을 때 파일을 쓰지 않고 실패합니다.
+
+`--polish`는 선택입니다. `GEMINI_API_KEY`가 있을 때 본문 문장만 한 번 다듬습니다. 기본 모델은 `gemini-3.8-flash`입니다. 429, RESOURCE_EXHAUSTED, 일일 할당량이면 같은 요청을 다음 모델(기본 `gemini-3.6-flash`)로 한 번만 다시 보내고, 그 요청도 할당량이면 `gemini-3.5-flash-lite`로 넘어가지 않고 원문을 유지합니다. 모델을 찾을 수 없으면 같은 모델은 다시 부르지 않고 목록의 다음 모델로 넘어갑니다. `GEMINI_POLISH_MODELS`(쉼표로 구분)가 있으면 그 순서를 쓰고, 없으면 `GEMINI_MODELS`, 그것도 없으면 위 세 모델을 씁니다. 결과 모델은 `POLISH_STATUS`의 `model=`과 `POLISH_SUMMARY`에 남깁니다. 프롬프트에는 쉬운 말 사전과 검사에 걸린 문장을 넣고, 그 문장은 제목이나 굵은 라벨이어도 요청에 포함합니다. 숫자·확실함·길이·방향이 바뀐 문장은 그 문장만 원문으로 되돌립니다. 고유명사도 비교하는데, 사전 용어를 제안 표현으로 바꾼 구간은 빼서 `관서`→`관청`처럼 끝글자가 지명과 겹치는 치환은 통과합니다. 굵은 글씨 안의 변경은 사전 치환이고 숫자가 그대로일 때만 허용합니다. 응답을 읽지 못하면 글 전체를 원문으로 둡니다. `--dry-run`과 함께 쓰면 상태 줄 다음에 다듬은 마크다운을 표시합니다. `--push`를 주지 않으면 커밋과 푸시를 하지 않고, 강제 푸시도 하지 않습니다.
 
 ### 분류
 
@@ -103,7 +105,7 @@ python publish.py path/to/post.md --category 정부혜택 --push
 
 표지는 `--cover /images/name.jpg` 또는 front matter `cover`로 지정합니다. 그 이미지는 게시 전에 `public/images/name.jpg`로 저장소에 있어야 하고, 파일이 없으면 글을 만들지 않습니다. 표지를 비우면 API를 호출하지 않고 post-meta `cover`를 빈 문자열로 둡니다. 목록은 분류 이름 앞 두 글자를 기본 이미지로 보여 줍니다. `GEMINI_API_KEY`는 `--polish` 문체 다듬기에만 씁니다. `--push`는 글 HTML만 커밋합니다.
 
-`.github/workflows/publish_post.yml`은 수동 실행만 됩니다. 기본값은 `dry_run: true`, `push: false`입니다. `push: true`로 `main`에 푸시하면, 이어서 `deploy-pages.yml`을 `main`에서 실행합니다. 다른 브랜치에 푸시하면 페이지 배포는 호출하지 않습니다.
+`.github/workflows/publish_post.yml`은 수동 실행만 됩니다. 기본값은 `dry_run: true`, `push: false`, `plain_lang_strict: false`입니다. `gemini_polish_models`에 쉼표로 모델을 적으면 `GEMINI_POLISH_MODELS`로 넘깁니다. `push: true`로 `main`에 푸시하면, 이어서 `deploy-pages.yml`을 `main`에서 실행합니다. 다른 브랜치에 푸시하면 페이지 배포는 호출하지 않습니다.
 
 ## 키워드 선별
 

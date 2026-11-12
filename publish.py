@@ -148,6 +148,9 @@ POLISH_SYSTEM_PROMPT = """너는 한국어 정보 글의 문장만 다듬는 편
 - 번역투와 인공지능이 쓴 듯한 상투적 표현을 뺀다.
 - 같은 맺음말이 반복되면 문장 끝만 조금씩 바꾼다.
 - 어미는 합니다/입니다 체를 유지한다. 해요체, 반말, 명령조로 바꾸지 마라.
+- 행정·법률 공문서 용어는 요청의 쉬운 말 사전 표현으로 바꾼다. plain_language가 true인 문장을 우선 고친다.
+- 명사만 포갠 추상 문장은 누가 무엇을 어느 날부터 어떻게 하는지 보이게 고친다. 기준일이 다릅니다, 출발점이 제각각입니다, 경우에는 방문 신청만 가능합니다는 각각 기한을 며칠부터 세는지, 시작하는 날이 항목마다 다릅니다, 직접 방문해서만 신청할 수 있습니다처럼 쓴다.
+- 사전에서 not_followed_by 글자가 용어 바로 뒤에 오거나 not_preceded_by 글자가 바로 앞에 오면 바꾸지 마라. 최고속도, 최고점, 최고한도의 최고는 독촉이 아니다.
 
 절대 하지 마라. 하나라도 어기면 그 문장은 폐기된다:
 - 숫자, 날짜, 단위, 백분율을 바꾸거나 빼거나 더하지 마라. 자릿수와 소수점도 그대로 둬라.
@@ -157,7 +160,7 @@ POLISH_SYSTEM_PROMPT = """너는 한국어 정보 글의 문장만 다듬는 편
 - 확실함의 정도를 올리거나 내리지 마라. 예상, 계획, 가칭, 확인하지 못함은 확정, 없음, 누락이 되면 안 된다.
 - 주장의 범위를 좁히거나 넓히지 마라. 구간, 대상, 시기를 더 구체적으로 만들거나 더 두루뭉술하게 만들지 마라.
 - 방향과 위치를 가리키는 말을 바꾸지 마라. 이후를 이북으로, 이전을 이남으로 바꾸는 일도 금지다.
-- 굵은 표시 ** 를 빼거나 옮기거나 더하지 마라. ** 와 ** 사이의 글자는 한 글자도 바꾸지 마라. 문장 부호를 ** 안으로 넣거나, 닫는 ** 바로 뒤에 조사나 단어를 붙여 표시가 깨지게 하지 마라.
+- 굵은 표시 ** 를 빼거나 옮기거나 더하지 마라. ** 와 ** 사이의 글자는 쉬운 말 사전의 용어를 그 제안 표현으로 바꾸는 경우만 바꿀 수 있다. 그 안의 숫자는 그대로 둔다. 사전에 없는 글자는 바꾸지 마라. 문장 부호를 ** 안으로 넣거나, 닫는 ** 바로 뒤에 조사나 단어를 붙여 표시가 깨지게 하지 마라.
 - 따옴표와 괄호 안의 글자를 바꾸지 마라.
 - 문장을 요약해 정보를 줄이거나, 설명을 덧붙여 정보를 늘리지 마라.
 
@@ -251,9 +254,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help=(
             "Gemini로 문장만 다듬습니다. 제목, 고지, 출처, 표, 코드, 굵은 라벨은 그대로 둡니다. "
+            "쉬운 말 검사에 걸린 문장은 그 문장도 함께 보냅니다. "
             "검증에 걸린 문장은 그 문장만 원문으로 되돌립니다. "
             "--dry-run과 함께 쓰면 다듬은 마크다운 전체를 표준 출력에 표시합니다."
         ),
+    )
+    parser.add_argument(
+        "--plain-lang-strict",
+        action="store_true",
+        help="쉬운 말 검사에 걸리면 파일을 쓰지 않고 실패합니다. 기본값은 경고만 하고 계속합니다.",
     )
     parser.add_argument(
         "--dry-run",
@@ -314,9 +323,17 @@ def publish(args: argparse.Namespace) -> Path | None:
     supplied_cover = args.cover if args.cover is not None else str(front_matter.get("cover") or "")
     cover = resolve_cover(root, supplied_cover)
 
+    plain_flags = plain_language_flags(raw)
+    _emit_plain_language(plain_flags)
+    if args.plain_lang_strict and plain_flags:
+        raise PublishError(
+            f"쉬운 말 검사에 {len(plain_flags)}곳이 걸렸습니다. "
+            "원고를 고치거나 plain_lang_strict를 끄세요."
+        )
+
     full_markdown = f"# {title}\n\n{body.strip()}\n"
     if args.polish:
-        polished = polish_markdown(raw)
+        polished = polish_markdown(raw, plain_flags)
         _polished_front, polished_document = parse_front_matter(polished)
         polished_title, body = split_h1(polished_document)
         if polished_title != title:
@@ -1032,6 +1049,8 @@ class PolishSentence:
     start: int
     end: int
     text: str
+    line: int = 0
+    flagged: bool = False
 
 
 class PolishModelError(Exception):
@@ -1049,17 +1068,19 @@ class _PolishResponseError(Exception):
         super().__init__(reason)
 
 
-def polish_markdown(markdown: str) -> str:
+def polish_markdown(markdown: str, plain_flags: list[dict] | None = None) -> str:
     """문장만 골라 한 번의 Gemini 요청으로 다듬는다.
 
     제목, 고지, 출처, 표, 코드, 굵은 라벨은 보내지 않는다.
+    쉬운 말 검사에 걸린 문장은 그 보호 규칙보다 우선해서 포함한다.
     검증에 걸린 문장만 원문으로 되돌리고, 응답 자체가 잘못되면 글 전체를 원문으로 둔다.
     """
     api_key = os.environ.get("GEMINI_API_KEY", "").strip()
     if not api_key:
         raise PublishError("GEMINI_API_KEY가 없습니다. --polish 를 쓰려면 환경 변수로 설정하세요.")
 
-    sentences, protected_units = collect_polish_sentences(markdown)
+    flags = plain_language_flags(markdown) if plain_flags is None else plain_flags
+    sentences, protected_units = collect_polish_sentences(markdown, flags)
     if not sentences:
         _emit_polish_status(
             {
@@ -1077,7 +1098,7 @@ def polish_markdown(markdown: str) -> str:
         model_name, response_text = call_polish_models(
             api_key,
             POLISH_SYSTEM_PROMPT,
-            build_polish_user_prompt(sentences),
+            build_polish_user_prompt(sentences, flags),
         )
     except PublishError as exc:
         if "라이브러리" in str(exc):
@@ -1102,22 +1123,63 @@ def polish_markdown(markdown: str) -> str:
     return result
 
 
-def build_polish_user_prompt(sentences: list[PolishSentence]) -> str:
+def build_polish_user_prompt(
+    sentences: list[PolishSentence],
+    plain_flags: list[dict] | None = None,
+) -> str:
+    flags = plain_flags or []
     payload = [
-        {"id": sentence.id, "text": sentence.text, "merged_with_next": False} for sentence in sentences
+        {
+            "id": sentence.id,
+            "text": sentence.text,
+            "merged_with_next": False,
+            "plain_language": sentence.flagged,
+        }
+        for sentence in sentences
     ]
+    noted: list[dict] = []
+    for sentence in sentences:
+        if not sentence.flagged:
+            continue
+        related = [
+            {"term": flag["term"], "suggestion": flag["suggestion"]}
+            for flag in flags
+            if flag.get("line") == sentence.line and flag.get("term") and str(flag["term"]) in sentence.text
+        ]
+        noted.append({"id": sentence.id, "hits": related})
+    dictionary = json.dumps(_dictionary_for_prompt(), ensure_ascii=False)
+    flagged = json.dumps(noted, ensure_ascii=False)
     body = json.dumps(payload, ensure_ascii=False)
     return (
+        "행정·법률 용어는 아래 쉬운 말 사전으로 바꿔라. "
+        "not_followed_by 글자가 용어 바로 뒤에 오거나 not_preceded_by 글자가 바로 앞에 오면 바꾸지 마라. "
+        "최고속도, 최고점, 최고한도처럼 가장 높다는 뜻의 최고는 독촉으로 바꾸지 마라.\n"
+        f"PLAIN_DICTIONARY:\n{dictionary}\n"
+        "plain_language가 true인 문장을 우선 고쳐라. "
+        "걸린 용어는 제안된 말로 바꾸고, 명사만 있는 추상 문장은 누가 무엇을 어느 날부터 어떻게 하는지 구체적인 문장으로 풀어라. "
+        "예: 기준일이 다릅니다 → 기한을 며칠부터 세는지 적는다. "
+        "출발점이 제각각입니다 → 시작하는 날이 항목마다 다릅니다. "
+        "경우에는 방문 신청만 가능합니다 → 직접 방문해서만 신청할 수 있습니다.\n"
+        f"PLAIN_LANG_HITS:\n{flagged}\n"
         "아래 JSON 배열의 문장만 다듬어, 같은 길이의 JSON 배열로 답하라. "
-        "id는 유지하고, 각 원소에 text와 merged_with_next를 넣어라.\n"
+        "id는 유지하고, 각 원소에 text와 merged_with_next를 넣어라. "
+        "plain_language 필드는 출력에 넣지 마라.\n"
         f"{_POLISH_USER_MARKER}{body}"
     )
 
 
-def collect_polish_sentences(markdown: str) -> tuple[list[PolishSentence], int]:
-    """보호 구간을 뺀 문장과, 보내지 않은 구간의 개수를 돌려준다."""
+def collect_polish_sentences(
+    markdown: str,
+    plain_flags: list[dict] | None = None,
+) -> tuple[list[PolishSentence], int]:
+    """보호 구간을 뺀 문장과, 보내지 않은 구간의 개수를 돌려준다.
+
+    쉬운 말 검사에 걸린 문장은 제목·굵은 라벨이어도 포함한다.
+    표, 코드, 고지, 출처, 프론트매터는 검사가 건너뛰므로 여기에도 넣지 않는다.
+    """
+    flags = plain_flags or []
     protected_units = 0
-    found: list[tuple[int, int, str]] = []
+    found: list[tuple[int, int, str, int, bool]] = []
     front = _FRONT_MATTER_RE.match(markdown)
     body_start = front.end() if front else 0
     if front:
@@ -1130,7 +1192,7 @@ def collect_polish_sentences(markdown: str) -> tuple[list[PolishSentence], int]:
     lines = _line_spans(markdown)
     index = 0
     while index < len(lines):
-        start, end, raw_line = lines[index]
+        start, _end, raw_line = lines[index]
         if start < body_start or start >= body_end:
             index += 1
             continue
@@ -1155,16 +1217,24 @@ def collect_polish_sentences(markdown: str) -> tuple[list[PolishSentence], int]:
         if not stripped:
             index += 1
             continue
-        if _protected_polish_line(content):
+        line_no = markdown.count("\n", 0, start) + 1
+        protected_line = _protected_polish_line(content)
+        if protected_line and not _line_has_plain_flag(content, line_no, flags):
             protected_units += 1
             index += 1
             continue
         payload_start = start
         payload = content
-        marker = _LIST_MARKER_RE.match(content)
-        if marker:
-            payload_start = start + len(marker.group(1))
-            payload = marker.group(2)
+        heading = re.match(r"^(#{1,6}\s+)(\S.*)$", content)
+        if heading:
+            payload_start = start + len(heading.group(1))
+            payload = heading.group(2)
+        else:
+            marker = _LIST_MARKER_RE.match(content)
+            if marker:
+                payload_start = start + len(marker.group(1))
+                payload = marker.group(2)
+        extracted: list[tuple[int, int, str]] = []
         for rel_start, rel_end in _balanced_sentence_spans(payload):
             absolute_start = payload_start + rel_start
             absolute_end = payload_start + rel_end
@@ -1172,12 +1242,29 @@ def collect_polish_sentences(markdown: str) -> tuple[list[PolishSentence], int]:
             if _is_disclaimer_text(sentence):
                 protected_units += 1
                 continue
-            found.append((absolute_start, absolute_end, sentence))
+            extracted.append((absolute_start, absolute_end, sentence))
+        if protected_line:
+            for span_start, span_end, sentence in extracted:
+                if _sentence_has_plain_flag(sentence, line_no, flags):
+                    found.append((span_start, span_end, sentence, line_no, True))
+                else:
+                    protected_units += 1
+        else:
+            for span_start, span_end, sentence in extracted:
+                flagged = _sentence_has_plain_flag(sentence, line_no, flags)
+                found.append((span_start, span_end, sentence, line_no, flagged))
         index += 1
 
     sentences = [
-        PolishSentence(id=number, start=span_start, end=span_end, text=text)
-        for number, (span_start, span_end, text) in enumerate(found, start=1)
+        PolishSentence(
+            id=number,
+            start=span_start,
+            end=span_end,
+            text=text,
+            line=line_no,
+            flagged=flagged,
+        )
+        for number, (span_start, span_end, text, line_no, flagged) in enumerate(found, start=1)
     ]
     return sentences, protected_units
 
@@ -1350,6 +1437,351 @@ def parse_polish_response(raw: str, expected: int) -> list[dict]:
     return rows
 
 
+_PLAIN_LANGUAGE: dict | None = None
+
+
+def _string_list(value: object) -> list[str]:
+    if value is None or value == "":
+        return []
+    if isinstance(value, str):
+        items = [value]
+    elif isinstance(value, list):
+        items = [str(item).strip() for item in value if str(item).strip()]
+    else:
+        raise PublishError("쉬운 말 사전의 예외 목록 형식이 잘못되었습니다.")
+    return sorted(set(items), key=len, reverse=True)
+
+
+def _load_plain_language() -> dict:
+    global _PLAIN_LANGUAGE
+    if _PLAIN_LANGUAGE is not None:
+        return _PLAIN_LANGUAGE
+    path = Path(__file__).resolve().parent / "config" / "plain_language.json"
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise PublishError(f"쉬운 말 사전을 읽지 못했습니다: {path}") from exc
+    if not isinstance(raw, dict):
+        raise PublishError("쉬운 말 사전은 JSON 객체여야 합니다.")
+    replacements_raw = raw.get("replacements")
+    patterns_raw = raw.get("patterns")
+    if not isinstance(replacements_raw, list) or not isinstance(patterns_raw, list):
+        raise PublishError("쉬운 말 사전에는 replacements와 patterns가 있어야 합니다.")
+    replacements: list[dict] = []
+    for item in replacements_raw:
+        if not isinstance(item, dict):
+            raise PublishError("쉬운 말 사전 항목 형식이 잘못되었습니다.")
+        term = str(item.get("term") or "").strip()
+        suggestion = str(item.get("suggestion") or "").strip()
+        if not term or not suggestion:
+            raise PublishError("쉬운 말 사전 항목에는 term과 suggestion이 필요합니다.")
+        replacements.append(
+            {
+                "term": term,
+                "suggestion": suggestion,
+                "not_followed_by": _string_list(item.get("not_followed_by")),
+                "not_preceded_by": _string_list(item.get("not_preceded_by")),
+            }
+        )
+    replacements.sort(key=lambda entry: len(entry["term"]), reverse=True)
+    patterns: list[dict] = []
+    for item in patterns_raw:
+        if not isinstance(item, dict):
+            raise PublishError("쉬운 말 패턴 형식이 잘못되었습니다.")
+        pattern = str(item.get("pattern") or "").strip()
+        suggestion = str(item.get("suggestion") or "").strip()
+        if not pattern or not suggestion:
+            raise PublishError("쉬운 말 패턴에는 pattern과 suggestion이 필요합니다.")
+        try:
+            compiled = re.compile(pattern)
+        except re.error as exc:
+            raise PublishError(f"쉬운 말 패턴을 해석하지 못했습니다: {pattern}") from exc
+        patterns.append({"pattern": pattern, "suggestion": suggestion, "compiled": compiled})
+    _PLAIN_LANGUAGE = {"replacements": replacements, "patterns": patterns}
+    return _PLAIN_LANGUAGE
+
+
+def _dictionary_for_prompt() -> list[dict]:
+    rows: list[dict] = []
+    for entry in _load_plain_language()["replacements"]:
+        row: dict = {"term": entry["term"], "suggestion": entry["suggestion"]}
+        if entry["not_followed_by"]:
+            row["not_followed_by"] = entry["not_followed_by"]
+        if entry["not_preceded_by"]:
+            row["not_preceded_by"] = entry["not_preceded_by"]
+        rows.append(row)
+    return rows
+
+
+def _longest_affix(text: str, index: int, affixes: list[str], *, at_end: bool) -> str:
+    """at_end이면 index 앞에서 끝나는 접사, 아니면 index에서 시작하는 접사를 고른다."""
+    best = ""
+    for affix in affixes:
+        matched = text[:index].endswith(affix) if at_end else text.startswith(affix, index)
+        if matched and len(affix) > len(best):
+            best = affix
+    return best
+
+
+def _forbidden_context(text: str, start: int, end: int, entry: dict) -> bool:
+    if _longest_affix(text, end, entry.get("not_followed_by") or [], at_end=False):
+        return True
+    if _longest_affix(text, start, entry.get("not_preceded_by") or [], at_end=True):
+        return True
+    return False
+
+
+def _apply_dictionary(text: str) -> str:
+    """금지 문맥이 아닌 사전 용어를 제안 표현으로 바꾼 문자열.
+
+    고유명사 검사는 이 결과를 비교해, 사전 치환으로 생기는 시·청 같은 끝글자를
+    기관 이름으로 오인하지 않는다. 치환 밖에 있는 이름은 그대로 비교한다.
+    """
+    entries = _load_plain_language()["replacements"]
+    occupied = [False] * len(text)
+    spans: list[tuple[int, int, str]] = []
+    for entry in entries:
+        term = entry["term"]
+        start = 0
+        while True:
+            index = text.find(term, start)
+            if index < 0:
+                break
+            end = index + len(term)
+            if any(occupied[index:end]) or _forbidden_context(text, index, end, entry):
+                start = index + 1
+                continue
+            for pos in range(index, end):
+                occupied[pos] = True
+            spans.append((index, end, entry["suggestion"]))
+            start = end
+    parts: list[str] = []
+    cursor = 0
+    for start, end, suggestion in sorted(spans):
+        parts.append(text[cursor:start])
+        parts.append(suggestion)
+        cursor = end
+    parts.append(text[cursor:])
+    return "".join(parts)
+
+
+def _guarded_collocations(text: str) -> Counter[str]:
+    counts: Counter[str] = Counter()
+    for entry in _load_plain_language()["replacements"]:
+        followed = entry["not_followed_by"]
+        preceded = entry["not_preceded_by"]
+        if not followed and not preceded:
+            continue
+        term = entry["term"]
+        start = 0
+        while True:
+            index = text.find(term, start)
+            if index < 0:
+                break
+            end = index + len(term)
+            follower = _longest_affix(text, end, followed, at_end=False)
+            leader = _longest_affix(text, index, preceded, at_end=True)
+            if follower or leader:
+                counts[f"{leader}{term}{follower}"] += 1
+            start = index + 1
+    return counts
+
+
+def _is_dictionary_substitution(original: str, polished: str) -> bool:
+    """polished가 original의 사전 치환만으로 만들어지면 True."""
+    entries = _load_plain_language()["replacements"]
+    index = 0
+    other = 0
+    changed = False
+    while index < len(original) and other < len(polished):
+        substituted = False
+        for entry in entries:
+            term = entry["term"]
+            suggestion = entry["suggestion"]
+            if term == suggestion:
+                continue
+            if not original.startswith(term, index) or not polished.startswith(suggestion, other):
+                continue
+            if _forbidden_context(original, index, index + len(term), entry):
+                continue
+            index += len(term)
+            other += len(suggestion)
+            changed = True
+            substituted = True
+            break
+        if substituted:
+            continue
+        if original[index] != polished[other]:
+            return False
+        index += 1
+        other += 1
+    return changed and index == len(original) and other == len(polished)
+
+
+def _bold_change_is_dictionary_substitution(original: str, polished: str) -> bool:
+    if original.count("**") != polished.count("**"):
+        return False
+    orig_spans = _BOLD_SPAN_RE.findall(original)
+    pol_spans = _BOLD_SPAN_RE.findall(polished)
+    if len(orig_spans) != len(pol_spans):
+        return False
+    changed = False
+    for orig, pol in zip(orig_spans, pol_spans):
+        if orig == pol:
+            continue
+        if Counter(_NUMBER_RE.findall(orig)) != Counter(_NUMBER_RE.findall(pol)):
+            return False
+        if not _is_dictionary_substitution(orig, pol):
+            return False
+        changed = True
+    return changed
+
+
+def plain_language_flags(markdown: str) -> list[dict]:
+    """본문에서 공문서 용어와 추상 문장을 찾는다.
+
+    프론트매터, 출처, 표, 코드, 고지 문장은 건너뛴다. 제목은 포함한다.
+    """
+    loaded = _load_plain_language()
+    entries = loaded["replacements"]
+    patterns = loaded["patterns"]
+    front = _FRONT_MATTER_RE.match(markdown)
+    body_start = front.end() if front else 0
+    sources_at = _sources_start(markdown, body_start)
+    body_end = sources_at if sources_at is not None else len(markdown)
+    flags: list[dict] = []
+    lines = _line_spans(markdown)
+    index = 0
+    while index < len(lines):
+        start, _end, raw_line = lines[index]
+        if start < body_start or start >= body_end:
+            index += 1
+            continue
+        newline_len = len(raw_line) - len(raw_line.rstrip("\r\n"))
+        content = raw_line[: len(raw_line) - newline_len] if newline_len else raw_line
+        stripped = content.strip()
+        if stripped.startswith("```"):
+            index += 1
+            while index < len(lines) and lines[index][0] < body_end:
+                fence_line = lines[index][2].strip()
+                index += 1
+                if fence_line.startswith("```"):
+                    break
+            continue
+        if stripped.startswith("|"):
+            index += 1
+            while index < len(lines) and lines[index][0] < body_end and lines[index][2].strip().startswith("|"):
+                index += 1
+            continue
+        if not stripped:
+            index += 1
+            continue
+        line_no = markdown.count("\n", 0, start) + 1
+        payload = content
+        heading = re.match(r"^(#{1,6}\s+)(\S.*)$", content)
+        if heading:
+            payload = heading.group(2)
+        else:
+            marker = _LIST_MARKER_RE.match(content)
+            if marker:
+                payload = marker.group(2)
+        for rel_start, rel_end in _balanced_sentence_spans(payload):
+            sentence = payload[rel_start:rel_end]
+            if _is_disclaimer_text(sentence):
+                continue
+            flags.extend(_flags_in_sentence(sentence, line_no, entries, patterns))
+        index += 1
+    return flags
+
+
+def _flags_in_sentence(
+    sentence: str,
+    line_no: int,
+    entries: list[dict],
+    patterns: list[dict],
+) -> list[dict]:
+    occupied = [False] * len(sentence)
+    matches: list[tuple[int, int, str, str]] = []
+    for entry in entries:
+        term = entry["term"]
+        start = 0
+        while True:
+            index = sentence.find(term, start)
+            if index < 0:
+                break
+            end = index + len(term)
+            if any(occupied[index:end]) or _forbidden_context(sentence, index, end, entry):
+                start = index + 1
+                continue
+            for pos in range(index, end):
+                occupied[pos] = True
+            matches.append((index, end, term, entry["suggestion"]))
+            start = end
+    for pattern in patterns:
+        for match in pattern["compiled"].finditer(sentence):
+            start, end = match.span()
+            if start == end or any(occupied[start:end]):
+                continue
+            for pos in range(start, end):
+                occupied[pos] = True
+            matches.append((start, end, match.group(0), pattern["suggestion"]))
+    matches.sort(key=lambda item: item[0])
+    return [
+        {
+            "term": term,
+            "suggestion": suggestion,
+            "excerpt": _plain_excerpt(sentence, start, end),
+            "line": line_no,
+        }
+        for start, end, term, suggestion in matches
+    ]
+
+
+def _plain_excerpt(sentence: str, start: int, end: int, limit: int = 140) -> str:
+    text = re.sub(r"\s+", " ", sentence).strip()
+    if len(text) <= limit:
+        return text
+    term = sentence[start:end]
+    normalized = text.find(term)
+    if normalized < 0:
+        return text[: limit - 1] + "…"
+    left = max(0, normalized - 40)
+    right = min(len(text), normalized + len(term) + 40)
+    excerpt = text[left:right].strip()
+    if left > 0:
+        excerpt = "…" + excerpt
+    if right < len(text):
+        excerpt = excerpt + "…"
+    return excerpt
+
+
+def _line_has_plain_flag(content: str, line_no: int, flags: list[dict]) -> bool:
+    for flag in flags:
+        term = str(flag.get("term") or "")
+        if flag.get("line") == line_no and term and term in content:
+            return True
+    return False
+
+
+def _sentence_has_plain_flag(sentence: str, line_no: int, flags: list[dict]) -> bool:
+    for flag in flags:
+        term = str(flag.get("term") or "")
+        if flag.get("line") == line_no and term and term in sentence:
+            return True
+    return False
+
+
+def _emit_plain_language(flags: list[dict]) -> None:
+    print(
+        "PLAIN_LANG_FLAGS: " + json.dumps(flags, ensure_ascii=False, separators=(",", ":")),
+        flush=True,
+    )
+    if flags:
+        print(f"PLAIN_LANG_STATUS: flags={len(flags)}", flush=True)
+    else:
+        print("PLAIN_LANG_STATUS: ok", flush=True)
+
+
 def sentence_reject_reason(original: str, polished: str) -> str | None:
     """다듬은 문장을 버릴 이유. 통과하면 None."""
     if original == polished:
@@ -1358,17 +1790,18 @@ def sentence_reject_reason(original: str, polished: str) -> str | None:
         return "문장 길이가 허용 범위를 벗어났습니다."
     if Counter(_NUMBER_RE.findall(original)) != Counter(_NUMBER_RE.findall(polished)):
         return "숫자가 바뀌었습니다."
-    if (
+    bold_changed = (
         original.count("**") != polished.count("**")
         or Counter(_BOLD_SPAN_RE.findall(original)) != Counter(_BOLD_SPAN_RE.findall(polished))
-    ):
+    )
+    if bold_changed and not _bold_change_is_dictionary_substitution(original, polished):
         return "굵은 글씨가 바뀌었습니다."
     if _bold_closer_breaks_commonmark(polished):
         return "굵은 표시가 문장 부호에 붙어 있습니다."
     for term in POLISH_BLOCKLIST:
         if term in polished and term not in original:
             return "원문에 없는 행정 용어가 있습니다."
-    if Counter(_proper_stems(original)) != Counter(_proper_stems(polished)):
+    if Counter(_proper_stems(_apply_dictionary(original))) != Counter(_proper_stems(_apply_dictionary(polished))):
         return "고유명사가 바뀌었습니다."
     if len(original) == 0 or not (
         POLISH_LENGTH_MIN <= len(polished) / len(original) <= POLISH_LENGTH_MAX
@@ -1379,6 +1812,8 @@ def sentence_reject_reason(original: str, polished: str) -> str | None:
             return "확실함의 정도가 바뀌었습니다."
     if Counter(_direction_stems(original)) != Counter(_direction_stems(polished)):
         return "방향·위치 표현이 바뀌었습니다."
+    if _guarded_collocations(original) != _guarded_collocations(polished):
+        return "사전에서 예외로 둔 단어를 바꿨습니다."
     return None
 
 
@@ -1579,13 +2014,21 @@ def _emit_polish_status(payload: dict) -> None:
 
 
 def _polish_model_names() -> tuple[str, ...]:
-    raw = os.environ.get("GEMINI_MODELS", "")
+    """문체 다듬기 모델. GEMINI_POLISH_MODELS가 있으면 그것을, 없으면 GEMINI_MODELS를 쓴다."""
+    raw = os.environ.get("GEMINI_POLISH_MODELS", "")
+    if not raw.strip():
+        raw = os.environ.get("GEMINI_MODELS", "")
     names = tuple(part.strip() for part in raw.split(",") if part.strip())
     return names or POLISH_GEMINI_MODELS
 
 
 def call_polish_models(api_key: str, system_prompt: str, user_prompt: str) -> tuple[str, str]:
-    """gemini-3.8-flash → 3.6-flash → 3.5-flash-lite 순으로 한 번만 요청한다."""
+    """목록의 첫 모델로 한 번 요청한다.
+
+    429, RESOURCE_EXHAUSTED, 일일 할당량이면 같은 요청을 다음 모델로 한 번만 다시 보낸다.
+    그 폴백도 할당량으로 실패하면 더 시도하지 않는다.
+    모델을 찾을 수 없는 경우에는 지금까지처럼 목록의 다음 모델로 넘어간다.
+    """
     try:
         import google.generativeai as genai
     except ImportError as exc:
@@ -1596,6 +2039,7 @@ def call_polish_models(api_key: str, system_prompt: str, user_prompt: str) -> tu
     genai.configure(api_key=api_key)
     names = _polish_model_names()
     errors: list[str] = []
+    quota_fallback_used = False
     for index, name in enumerate(names):
         print(
             f"Gemini 모델 {name}로 문체 다듬기를 요청합니다. ({index + 1}/{len(names)})",
@@ -1604,13 +2048,24 @@ def call_polish_models(api_key: str, system_prompt: str, user_prompt: str) -> tu
         try:
             text = _generate_polish(genai, name, system_prompt, user_prompt)
         except Exception as exc:  # noqa: BLE001 - 모델별 실패는 다음 모델로 넘긴다.
-            if _is_daily_quota_message(exc):
+            errors.append(f"{name}: {exc}")
+            if _is_quota_or_rate_limit(exc):
+                if quota_fallback_used or index + 1 >= len(names):
+                    print(
+                        "Gemini 할당량 또는 속도 제한입니다. 폴백 모델을 더 시도하지 않습니다.",
+                        file=sys.stderr,
+                    )
+                    raise PolishModelError(
+                        "api",
+                        "Gemini 할당량 또는 속도 제한으로 문체 다듬기를 중단합니다.",
+                    ) from exc
+                quota_fallback_used = True
                 print(
-                    "Gemini 할당량 초과입니다. 일일 한도로 보여 다음 모델로 넘어가지 않습니다.",
+                    f"Gemini 모델 {name}가 할당량 또는 속도 제한(429)입니다. "
+                    f"같은 요청을 폴백 모델 {names[index + 1]}로 한 번만 다시 보냅니다. 원인: {exc}",
                     file=sys.stderr,
                 )
-                raise PolishModelError("api", "Gemini 일일 할당량을 초과했습니다.") from exc
-            errors.append(f"{name}: {exc}")
+                continue
             if index + 1 >= len(names):
                 break
             if _is_model_unavailable_message(exc):
@@ -1649,6 +2104,22 @@ def _generate_polish(genai: object, name: str, system_prompt: str, user_prompt: 
     if not text or not str(text).strip():
         raise PublishError("Gemini가 빈 응답을 반환했습니다.")
     return str(text)
+
+
+def _is_quota_or_rate_limit(exc: Exception) -> bool:
+    """429, RESOURCE_EXHAUSTED, 일일·분당 할당량."""
+    if type(exc).__name__ in {"ResourceExhausted", "TooManyRequests"}:
+        return True
+    if getattr(exc, "code", None) == 429 or getattr(exc, "status_code", None) == 429:
+        return True
+    text = str(exc).lower().replace("_", " ").replace("-", " ")
+    if "resource exhausted" in text:
+        return True
+    if "per day" in text or "perday" in text or "per minute" in text or "perminute" in text:
+        return True
+    if "rate limit" in text or "too many requests" in text or "quota" in text:
+        return True
+    return re.search(r"\b429\b", text) is not None
 
 
 def _is_daily_quota_message(exc: Exception) -> bool:
