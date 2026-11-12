@@ -43,7 +43,7 @@ npm run dev
 - `thumbnail`은 `public/images`에 둔 파일의 경로(`/images/...`)이거나 `https` 주소
 - `links[].tone`에 `"tool"`을 주면 파란 추천 툴 줄로 표시됩니다
 - 본문의 스크립트, 이벤트 속성, `javascript:` 주소는 빌드할 때 제거됩니다
-- 같은 파일에서 `thumbnail` 대신 `cover`, `links` 대신 `related`를 써도 읽습니다. `cover`가 비어 있으면 표지를 그리지 않습니다.
+- 같은 파일에서 `thumbnail` 대신 `cover`, `links` 대신 `related`를 써도 읽습니다. `cover`가 비어 있으면 목록 카드는 분류 이름 앞 두 글자를 기본 이미지로 보여 줍니다.
 
 ### 정적 HTML로 올리기
 
@@ -101,7 +101,7 @@ python publish.py path/to/post.md --category 정부혜택 --push
 
 설명문은 본문 첫 소제목 앞의 두 문장입니다. 관련 글을 `--related`나 front matter `related`로 적으면 그 목록을 그대로 씁니다. 적지 않으면 같은 분류의 다른 글 중 최신 3개의 `/posts/<slug>/` 링크를 넣습니다. 같은 분류 글이 하나라도 있으면 그 글만 넣고, 다른 분류로 채우지 않습니다. 같은 분류 글이 하나도 없을 때만 다른 분류의 최신 글 최대 3개로 대신합니다. 지금 올리는 글은 빼며, 추천 툴 링크는 자동으로 넣지 않습니다.
 
-표지는 `--cover /images/name.jpg` 또는 front matter `cover`가 있으면 그 경로를 그대로 씁니다. 비어 있으면 같은 `GEMINI_API_KEY`로 `gemini-nano-banana-2.1`에 1K 정사각형을 요청한 뒤 320×320 JPEG로 줄여 `public/images/<짧은-영문-이름>.jpg`에 저장하고, post-meta `cover`에 넣습니다. 키가 없거나 이미지 생성이 실패하면 글 파일을 쓰지 않습니다. `--dry-run`은 이미지 API를 호출하지 않고, 표지를 만들 예정이라고만 출력합니다. `--push`는 글 HTML과 이번에 만든 JPEG를 함께 커밋합니다.
+표지는 `--cover /images/name.jpg` 또는 front matter `cover`로 지정합니다. 그 이미지는 게시 전에 `public/images/name.jpg`로 저장소에 있어야 하고, 파일이 없으면 글을 만들지 않습니다. 표지를 비우면 API를 호출하지 않고 post-meta `cover`를 빈 문자열로 둡니다. 목록은 분류 이름 앞 두 글자를 기본 이미지로 보여 줍니다. `GEMINI_API_KEY`는 `--polish` 문체 다듬기에만 씁니다. `--push`는 글 HTML만 커밋합니다.
 
 `.github/workflows/publish_post.yml`은 수동 실행만 됩니다. 기본값은 `dry_run: true`, `push: false`입니다.
 

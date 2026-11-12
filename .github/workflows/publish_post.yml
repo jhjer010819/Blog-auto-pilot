@@ -24,7 +24,7 @@ on:
         required: false
         default: ""
       cover:
-        description: "표지 경로. 비우면 제목과 분류로 320×320 표지를 만듭니다."
+        description: "표지 경로(/images/<이름>). 이미지는 먼저 public/images에 있어야 합니다. 비우면 표지를 만들지 않고 분류 기본 이미지를 씁니다."
         required: false
         default: ""
       dry_run:

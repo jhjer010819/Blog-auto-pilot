@@ -4,7 +4,8 @@
 파일은 post-meta JSON으로 시작하고 나머지는 본문 HTML입니다.
 홈 링크, 제목, 날짜, 「함께 읽으면 유용한 정보」는 사이트가 붙입니다.
 공개 주소는 https://blog.mymallow.cloud/posts/<slug>/ 입니다.
-cover가 비어 있으면 게시 때 320×320 JPEG 표지를 만들어 public/images에 저장합니다.
+cover가 비어 있으면 post-meta cover를 빈 문자열로 둡니다. 사이트 목록은 분류 기본 이미지를 보여 줍니다.
+표지는 게시 전에 public/images에 두고 --cover /images/<이름> 으로 넘깁니다. Gemini는 문체 다듬기에만 씁니다.
 분류는 교육, 건강, 과학, IT, 부동산, 정부혜택, 세금, 정책·제도, 생활정보 중 하나입니다.
 관련 글을 지정하지 않으면 같은 분류의 다른 글을 최신순으로 최대 3개 고릅니다.
 같은 분류 글이 없을 때만 다른 분류의 최신 글로 대신합니다.
@@ -24,8 +25,6 @@ cover가 비어 있으면 게시 때 320×320 JPEG 표지를 만들어 public/im
 from __future__ import annotations
 
 import argparse
-import base64
-import io
 import json
 import os
 import re
@@ -34,7 +33,7 @@ import sys
 import time
 from collections import Counter
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 KST = timezone(timedelta(hours=9))
 SITE_ORIGIN = "https://blog.mymallow.cloud"
@@ -75,14 +74,6 @@ DESCRIPTION_HARD_MAX = 200
 SLUG_MAX = 80
 GEMINI_MODEL = "gemini-3.8-flash"
 GEMINI_RPM_MIN_WAIT_SECONDS = 60
-# Imagen is shut down on the Gemini API. Covers use Nano Banana via google-genai.
-# 1K is the smallest billed output; the saved file is a compressed 320 JPEG.
-COVER_IMAGE_MODEL = "gemini-nano-banana-2.1"
-COVER_EDGE = 320
-COVER_JPEG_MAX_BYTES = 20 * 1024
-COVER_IMAGE_ATTEMPTS = 2
-COVER_IMAGE_RETRY_SECONDS = 2.0
-COVER_STEM_MAX = 40
 
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
@@ -107,8 +98,6 @@ _META_FILE_RE = re.compile(
     re.DOTALL,
 )
 _GENERIC_SLUGS = {"post", "draft", "input", "inbox", "readme", "index"}
-_COVER_STEM_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+){1,3}$")
-_COVER_STEM_BANNED = frozenset({"cover", "image", "img", "photo", "thumbnail", "post", "blog"})
 _DISCLAIMERS = (
     "본 글은 정보 제공을 목적으로 작성되었으며, 정확한 진단 및 치료는 반드시 전문의와 상담하시기 바랍니다.",
     "정부 정책 및 지원 기준은 시기별로 개정될 수 있으므로 정확한 내용은 공식 기관 공고를 확인해 주세요.",
@@ -139,7 +128,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--date", help="게시 날짜 YYYY-MM-DD. 기본값은 한국 표준시 오늘입니다.")
     parser.add_argument(
         "--cover",
-        help="표지 경로. 비우면 제목과 분류로 320×320 JPEG를 만들어 public/images에 저장합니다.",
+        help=(
+            "표지 경로(/images/<이름>). public/images에 파일이 있어야 합니다. "
+            "비우면 표지를 만들지 않고 분류 기본 이미지를 씁니다."
+        ),
     )
     parser.add_argument(
         "--related",
@@ -169,7 +161,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--push",
         action="store_true",
-        help="글 파일과, 이번 게시에 만든 표지 JPEG를 현재 브랜치에 커밋하고 푸시합니다. 기본값은 푸시하지 않습니다.",
+        help="글 파일을 현재 브랜치에 커밋하고 푸시합니다. 기본값은 푸시하지 않습니다.",
     )
     parser.add_argument(
         "--root",
@@ -218,7 +210,7 @@ def publish(args: argparse.Namespace) -> Path | None:
     else:
         slug = ensure_unique_slug(root, validate_slug(slug_from_source(source, title)), title)
     supplied_cover = args.cover if args.cover is not None else str(front_matter.get("cover") or "")
-    supplied_cover = supplied_cover.strip()
+    cover = resolve_cover(root, supplied_cover)
 
     full_markdown = f"# {title}\n\n{body.strip()}\n"
     if args.polish:
@@ -240,17 +232,6 @@ def publish(args: argparse.Namespace) -> Path | None:
         description = supplied_description
     else:
         description = description_from_html(body_html)
-    cover_path: Path | None = None
-    cover_bytes: bytes | None = None
-    if supplied_cover:
-        cover = supplied_cover
-        cover_plan = "supplied"
-    elif args.dry_run:
-        cover = ""
-        cover_plan = "generate"
-    else:
-        cover, cover_path, cover_bytes = build_generated_cover(root, title, category)
-        cover_plan = "generated"
     meta = {
         "title": title,
         "category": category,
@@ -274,24 +255,50 @@ def publish(args: argparse.Namespace) -> Path | None:
         length,
         len(related),
         cover,
-        cover_plan,
         args.dry_run,
         args.push,
     )
     if args.dry_run:
         return None
 
-    if cover_path is not None and cover_bytes is not None:
-        cover_path.parent.mkdir(parents=True, exist_ok=True)
-        cover_path.write_bytes(cover_bytes)
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(document_html, encoding="utf-8")
     if args.push:
-        paths = [destination]
-        if cover_path is not None:
-            paths.append(cover_path)
-        git_commit_and_push(root, paths, title)
+        git_commit_and_push(root, [destination], title)
     return destination
+
+
+def resolve_cover(root: Path, supplied: str) -> str:
+    """빈 표지는 그대로 두고, /images/ 경로는 public/images 안의 파일인지 확인합니다."""
+    cover = supplied.strip()
+    if not cover:
+        return ""
+    if not cover.startswith("/images/"):
+        return cover
+    name = cover[len("/images/") :]
+    if not _is_repo_image_name(name):
+        raise PublishError(
+            f"표지 경로가 올바르지 않습니다: {cover}. /images/ 안의 파일 이름을 지정하세요."
+        )
+    images_dir = (root / "public" / "images").resolve()
+    path = (images_dir / name).resolve()
+    if path != images_dir and images_dir not in path.parents:
+        raise PublishError(
+            f"표지 경로가 올바르지 않습니다: {cover}. /images/ 안의 파일 이름을 지정하세요."
+        )
+    if not path.is_file():
+        raise PublishError(
+            f"표지 파일이 없습니다: public/images/{name}. "
+            "public/images에 이미지를 먼저 넣은 뒤 --cover /images/<이름> 으로 지정하세요."
+        )
+    return cover
+
+
+def _is_repo_image_name(name: str) -> bool:
+    if not name or name.endswith("/") or "\\" in name or "?" in name or "\x00" in name:
+        return False
+    parts = PurePosixPath(name).parts
+    return bool(parts) and all(part not in {"", ".", ".."} for part in parts)
 
 
 def resolve_input(root: Path, markdown: str | None) -> Path:
@@ -1039,201 +1046,10 @@ def _rpm_wait_seconds(exc: Exception) -> float:
     return float(max(GEMINI_RPM_MIN_WAIT_SECONDS, int(hint + 0.999)))
 
 
-def build_generated_cover(root: Path, title: str, category: str) -> tuple[str, Path, bytes]:
-    api_key = os.environ.get("GEMINI_API_KEY", "").strip()
-    if not api_key:
-        raise PublishError(
-            "GEMINI_API_KEY가 없습니다. 표지를 만들려면 환경 변수로 설정하거나 --cover 로 경로를 지정하세요."
-        )
-    stem = request_cover_stem(api_key, title, category)
-    path = allocate_cover_path(root / "public" / "images", stem)
-    raw = fetch_cover_image_bytes(api_key, build_cover_prompt(title, category))
-    return f"/images/{path.name}", path, normalize_cover_jpeg(raw)
-
-
-def build_cover_prompt(title: str, category: str) -> str:
-    return (
-        "Create a square cinematic editorial photograph for a Korean information blog. "
-        "Use the title and category only as the subject of the scene. "
-        f"Category: {category}. Title: {title}. "
-        "Photorealistic, quiet, natural light, shallow depth of field, like a stock photograph. "
-        "No readable text, letters, numbers, logos, watermarks, or brand names. "
-        "No real-school insignia, military insignia, uniforms with badges, or weapons. "
-        "Not an infographic, poster, diagram, collage, or clickbait thumbnail."
-    )
-
-
-def request_cover_stem(api_key: str, title: str, category: str) -> str:
-    problems: list[str] = []
-    for _attempt in range(2):
-        raw = call_gemini(
-            api_key,
-            build_cover_stem_prompt(title, category, problems),
-            max_output_tokens=64,
-        )
-        try:
-            return validate_cover_stem(normalize_cover_stem(raw))
-        except PublishError as exc:
-            problems = [str(exc)]
-            print(f"표지 파일 이름을 다시 요청합니다: {exc}", file=sys.stderr)
-    raise PublishError("표지 파일 이름을 만들지 못했습니다. 짧은 영문 이름을 받지 못했습니다.")
-
-
-def build_cover_stem_prompt(title: str, category: str, problems: list[str]) -> str:
-    retry = ""
-    if problems:
-        retry = "이전 답은 거절되었다: " + " ".join(problems) + "\n다시 짧은 영문 케밥만 답하라.\n"
-    return (
-        "블로그 표지 파일 이름의 영문 슬러그만 한 줄로 답하라.\n"
-        "조건:\n"
-        "- 영어 단어 2~4개를 하이픈으로 잇는다. 예: youth-rent, year-end-tax\n"
-        "- 소문자, 숫자, 하이픈만 사용한다. 확장자는 붙이지 않는다.\n"
-        "- 한국어를 쓰지 않는다.\n"
-        "- cover, image, photo, thumbnail, post, blog 는 쓰지 않는다.\n"
-        "- 설명은 붙이지 않는다.\n\n"
-        f"{retry}분류: {category}\n제목: {title}\n"
-    )
-
-
-def normalize_cover_stem(raw: str) -> str:
-    text = raw.strip()
-    if not text:
-        return ""
-    line = text.splitlines()[0].strip().strip("`\"'").lower()
-    line = re.sub(r"\.jpe?g$", "", line).replace("_", "-").replace(" ", "-")
-    match = re.search(r"[a-z0-9]+(?:-[a-z0-9]+){1,3}", line)
-    stem = match.group(0) if match else re.sub(r"-{2,}", "-", re.sub(r"[^a-z0-9-]+", "-", line)).strip("-")
-    if len(stem) > COVER_STEM_MAX:
-        stem = stem[:COVER_STEM_MAX].rstrip("-")
-        if "-" in stem:
-            stem = stem.rsplit("-", 1)[0]
-    return stem.strip("-")
-
-
-def validate_cover_stem(stem: str) -> str:
-    parts = stem.split("-") if stem else []
-    if not _COVER_STEM_RE.fullmatch(stem) or any(part in _COVER_STEM_BANNED for part in parts):
-        raise PublishError(f"표지 파일 이름이 짧고 영문 케밥 형식이 아닙니다: {stem or '(빈 값)'}")
-    return stem
-
-
-def allocate_cover_path(images_dir: Path, stem: str) -> Path:
-    path = images_dir / f"{stem}.jpg"
-    if not path.exists():
-        return path
-    for number in range(2, 51):
-        suffix = f"-{number}"
-        base = stem[: COVER_STEM_MAX - len(suffix)].rstrip("-")
-        path = images_dir / f"{base}{suffix}.jpg"
-        if not path.exists():
-            return path
-    raise PublishError("표지 파일 이름을 유일하게 만들지 못했습니다.")
-
-
-def load_genai():
-    try:
-        from google import genai
-    except ImportError as exc:
-        raise PublishError(
-            "google-genai 라이브러리가 없습니다. pip install -r requirements.txt 를 실행하세요."
-        ) from exc
-    return genai
-
-
-def fetch_cover_image_bytes(api_key: str, prompt: str) -> bytes:
-    client = load_genai().Client(api_key=api_key)
-    last: Exception | None = None
-    for attempt in range(COVER_IMAGE_ATTEMPTS):
-        try:
-            interaction = client.interactions.create(
-                model=COVER_IMAGE_MODEL,
-                input=prompt,
-                response_format={
-                    "type": "image",
-                    "mime_type": "image/jpeg",
-                    "aspect_ratio": "1:1",
-                    "image_size": "1K",
-                    "delivery": "inline",
-                },
-            )
-            return cover_image_bytes(getattr(interaction, "output_image", None))
-        except Exception as exc:  # noqa: BLE001 - 이미지 API 오류는 한 번 더 시도한다.
-            last = exc
-            if attempt + 1 >= COVER_IMAGE_ATTEMPTS:
-                break
-            wait = _cover_retry_wait(exc)
-            print(f"표지 이미지 생성을 다시 시도합니다: {exc}", file=sys.stderr)
-            time.sleep(wait)
-    raise PublishError(f"표지 이미지를 만들지 못했습니다: {last}") from last
-
-
-def cover_image_bytes(image: object) -> bytes:
-    data = image.get("data") if isinstance(image, dict) else getattr(image, "data", None)
-    if isinstance(data, str):
-        payload = data.strip()
-        if payload.startswith("data:") and "," in payload:
-            payload = payload.split(",", 1)[1]
-        if not payload:
-            raise PublishError("표지 이미지 응답이 비어 있습니다.")
-        try:
-            decoded = base64.b64decode(payload, validate=False)
-        except Exception as exc:
-            raise PublishError("표지 이미지 데이터를 읽지 못했습니다.") from exc
-        if not decoded:
-            raise PublishError("표지 이미지 응답이 비어 있습니다.")
-        return decoded
-    if isinstance(data, (bytes, bytearray)):
-        if not data:
-            raise PublishError("표지 이미지 응답이 비어 있습니다.")
-        return bytes(data)
-    raise PublishError("표지 이미지 응답이 비어 있습니다.")
-
-
-def _cover_retry_wait(exc: Exception) -> float:
-    if _is_transient_rpm_limit(exc):
-        return _rpm_wait_seconds(exc)
-    return COVER_IMAGE_RETRY_SECONDS
-
-
-def normalize_cover_jpeg(raw: bytes) -> bytes:
-    try:
-        from PIL import Image
-    except ImportError as exc:
-        raise PublishError(
-            "Pillow 라이브러리가 없습니다. pip install -r requirements.txt 를 실행하세요."
-        ) from exc
-    try:
-        with Image.open(io.BytesIO(raw)) as image:
-            rgb = image.convert("RGB")
-            if rgb.size != (COVER_EDGE, COVER_EDGE):
-                rgb = rgb.resize((COVER_EDGE, COVER_EDGE), Image.Resampling.LANCZOS)
-            best: bytes | None = None
-            for quality in range(78, 19, -3):
-                buffer = io.BytesIO()
-                rgb.save(buffer, format="JPEG", quality=quality, optimize=True)
-                data = buffer.getvalue()
-                best = data
-                if len(data) <= COVER_JPEG_MAX_BYTES:
-                    return data
-            if best is None:
-                raise PublishError("표지 이미지를 JPEG로 바꾸지 못했습니다.")
-            return best
-    except PublishError:
-        raise
-    except Exception as exc:
-        raise PublishError(f"표지 이미지를 JPEG로 바꾸지 못했습니다: {exc}") from exc
-
-
-def cover_summary_line(cover: str, plan: str) -> str:
-    if plan == "generate":
-        return (
-            "표지: 비어 있어 게시 시 320×320 JPEG를 생성합니다. "
-            "검증 실행에서는 이미지 API를 호출하지 않고 파일도 쓰지 않습니다."
-        )
+def cover_summary_line(cover: str) -> str:
     if cover:
-        suffix = " (이번 게시에 생성함)" if plan == "generated" else ""
-        return f"표지: {cover}{suffix}"
-    return "표지: 없음"
+        return f"표지: {cover}"
+    return "표지: 없음 (분류 기본 이미지 사용)"
 
 
 def print_polished_markdown(markdown: str) -> None:
@@ -1254,7 +1070,6 @@ def print_summary(
     length: int,
     related_count: int,
     cover: str,
-    cover_plan: str,
     dry_run: bool,
     push: bool,
 ) -> None:
@@ -1269,7 +1084,7 @@ def print_summary(
     print(f"제목: {title}")
     print(f"분류: {category}")
     print(f"날짜: {date}")
-    print(cover_summary_line(cover, cover_plan))
+    print(cover_summary_line(cover))
     print(f"설명: {description}")
     print(f"본문 글자 수: {length}")
     print(f"관련 글: {related_count}")
