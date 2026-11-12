@@ -156,7 +156,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--polish",
         action="store_true",
-        help="Gemini로 문체만 다듬습니다. 사실, 숫자, 제목, 고지 문장은 유지합니다.",
+        help=(
+            "Gemini로 문체만 다듬습니다. 사실, 숫자, 제목, 고지 문장, 표는 유지합니다. "
+            "--dry-run과 함께 쓰면 다듬은 마크다운 전체를 표준 출력에 표시합니다."
+        ),
     )
     parser.add_argument(
         "--dry-run",
@@ -225,12 +228,18 @@ def publish(args: argparse.Namespace) -> Path | None:
             raise PublishError("문체 다듬기 과정에서 제목이 바뀌었습니다.")
         if not body.strip():
             raise PublishError("문체 다듬기 뒤 본문이 비었습니다.")
+        if args.dry_run:
+            print_polished_markdown(full_markdown)
 
     related = resolve_related(args, front_matter, root, slug, category)
     body_html = markdown_to_html(body)
     if not body_html.strip():
         raise PublishError("마크다운을 HTML로 바꾸지 못했습니다.")
-    description = description_from_html(body_html)
+    supplied_description = str(front_matter.get("description") or "").strip()
+    if supplied_description and len(supplied_description) <= DESCRIPTION_HARD_MAX:
+        description = supplied_description
+    else:
+        description = description_from_html(body_html)
     cover_path: Path | None = None
     cover_bytes: bytes | None = None
     if supplied_cover:
@@ -1225,6 +1234,13 @@ def cover_summary_line(cover: str, plan: str) -> str:
         suffix = " (이번 게시에 생성함)" if plan == "generated" else ""
         return f"표지: {cover}{suffix}"
     return "표지: 없음"
+
+
+def print_polished_markdown(markdown: str) -> None:
+    """검증 실행의 잡 로그에서 다듬은 글 전체를 복사할 수 있게 표시합니다."""
+    print("=== POLISHED START ===", flush=True)
+    print(markdown.rstrip("\n"), flush=True)
+    print("=== POLISHED END ===", flush=True)
 
 
 def print_summary(

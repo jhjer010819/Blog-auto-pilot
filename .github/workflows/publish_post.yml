@@ -19,6 +19,10 @@ on:
         description: "Gemini로 문체만 다듬기"
         type: boolean
         default: false
+      polished_path:
+        description: "이미 다듬은 마크다운 경로. 값이 있고 dry_run이 아니면 이 파일을 게시하고 다시 다듬지 않습니다."
+        required: false
+        default: ""
       cover:
         description: "표지 경로. 비우면 제목과 분류로 320×320 표지를 만듭니다."
         required: false
@@ -63,6 +67,7 @@ jobs:
           SLUG: ${{ inputs.slug }}
           COVER: ${{ inputs.cover }}
           DO_POLISH: ${{ inputs.polish }}
+          POLISHED_PATH: ${{ inputs.polished_path }}
           DO_DRY_RUN: ${{ inputs.dry_run }}
           DO_PUSH: ${{ inputs.push }}
         run: |
@@ -71,14 +76,22 @@ jobs:
             echo "dry_run과 push는 함께 사용할 수 없습니다." >&2
             exit 1
           fi
-          cmd=(python publish.py "$MARKDOWN_PATH" --category "$CATEGORY")
+          source_path="$MARKDOWN_PATH"
+          use_polish=false
+          if [ -n "$POLISHED_PATH" ] && [ "$DO_DRY_RUN" != "true" ]; then
+            source_path="$POLISHED_PATH"
+          elif [ "$DO_POLISH" = "true" ]; then
+            use_polish=true
+          fi
+          echo "입력 마크다운: ${source_path}"
+          cmd=(python publish.py "$source_path" --category "$CATEGORY")
           if [ -n "$SLUG" ]; then
             cmd+=(--slug "$SLUG")
           fi
           if [ -n "$COVER" ]; then
             cmd+=(--cover "$COVER")
           fi
-          if [ "$DO_POLISH" = "true" ]; then
+          if [ "$use_polish" = "true" ]; then
             cmd+=(--polish)
           fi
           if [ "$DO_DRY_RUN" = "true" ]; then
