@@ -55,6 +55,15 @@ jobs:
           test -f out/posts/starbucks-winter-frequency/index.html
           test -f out/posts/2026-year-end-tax-refund/index.html
           test -f out/posts/sagwanhakgyo-sinchegeomsa-bulhapgyeok-gijungwa-ipsi-jiwonja-jaegeom-daecheobeop/index.html
+          test -f out/about/index.html
+          test -f out/privacy/index.html
+          test -f out/terms/index.html
+          grep -q '소개' out/index.html
+          grep -q '개인정보 처리방침' out/index.html
+          grep -q '이용약관' out/index.html
+          grep -q '개인정보 처리방침' out/posts/2026-youth-rent-support/index.html
+          grep -q 'google-adsense-account' out/index.html
+          grep -q 'ca-pub-5854572232694460' out/index.html
           test -f out/sitemap.xml
           grep -q 'sagwanhakgyo-sinchegeomsa-bulhapgyeok-gijungwa-ipsi-jiwonja-jaegeom-daecheobeop' out/sitemap.xml
           test -f out/robots.txt

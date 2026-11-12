@@ -2,7 +2,7 @@ import Link from "next/link";
 
 export default function NotFound() {
   return (
-    <main className="min-h-screen bg-white">
+    <main className="flex-1 bg-white">
       <div className="mx-auto flex w-full max-w-[720px] flex-col px-5 pb-16 pt-7 sm:px-6 sm:pt-10">
         <Link
           href="/"
