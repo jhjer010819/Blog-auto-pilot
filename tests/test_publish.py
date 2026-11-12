@@ -335,22 +335,46 @@ class PublishTests(unittest.TestCase):
                     str(root),
                 ]
             )
+            prompts: list[str] = []
+
+            def fake_polish(api_key: str, system_prompt: str, user_prompt: str) -> tuple[str, str]:
+                prompts.append(user_prompt)
+                return "gemini-3.6-flash", polish_json_from_prompt(
+                    user_prompt,
+                    lambda sentence: (
+                        sentence.replace("0.6", "0.7")
+                        if "0.6" in sentence
+                        else sentence.replace("확인해야 합니다.", "점검해야 합니다.")
+                    ),
+                )
+
             with (
                 patch.dict(os.environ, {"GEMINI_API_KEY": "test-key"}),
-                patch.object(publish, "call_gemini", side_effect=[bad, good]) as gemini,
+                patch.object(publish, "call_polish_models", side_effect=fake_polish) as gemini,
+                patch.object(publish, "call_gemini", side_effect=AssertionError("cover text api")),
                 patch.object(publish, "fetch_cover_image_bytes", side_effect=AssertionError("image api")),
                 patch.object(publish, "request_cover_stem", side_effect=AssertionError("name api")),
                 redirect_stdout(io.StringIO()) as stdout,
             ):
                 self.assertIsNone(publish.publish(args))
-            self.assertEqual(gemini.call_count, 2)
+            self.assertEqual(gemini.call_count, 1)
+            self.assertEqual(len(prompts), 1)
+            self.assertIn("SENTENCES_JSON:", prompts[0])
+            for disclaimer in publish._DISCLAIMERS:
+                self.assertNotIn(disclaimer, prompts[0])
             text = stdout.getvalue()
             self.assertIn("파일은 쓰지 않았습니다", text)
             self.assertIn("이미지 API를 호출하지 않고", text)
             self.assertIn("320×320 JPEG를 생성합니다", text)
+            status_at = text.index("POLISH_STATUS:")
+            summary_at = text.index("POLISH_SUMMARY:")
+            start_at = text.index("=== POLISHED START ===")
+            self.assertLess(status_at, summary_at)
+            self.assertLess(summary_at, start_at)
+            self.assertIn("POLISH_STATUS: ok model=gemini-3.6-flash applied=40 reverted=1 kept=4", text)
             body = polished_between_markers(text)
-            self.assertEqual(body, good.strip("\n"))
             self.assertIn("점검해야 합니다.", body)
+            self.assertNotIn("확인해야 합니다.", body)
             self.assertIn("0.6", body)
             self.assertNotIn("0.7", body)
             self.assertIn("# 제목", body)
@@ -359,9 +383,8 @@ class PublishTests(unittest.TestCase):
                 self.assertIn(disclaimer, body)
             self.assertEqual([path.relative_to(root).as_posix() for path in root.rglob("*") if path.is_file()], ["draft.md"])
 
-    def test_failed_polish_does_not_print_or_write(self) -> None:
+    def test_failed_polish_reverts_without_writing(self) -> None:
         original = long_article()
-        bad = original.replace("0.6", "0.7", 1)
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             source = root / "draft.md"
@@ -380,18 +403,19 @@ class PublishTests(unittest.TestCase):
             )
             with (
                 patch.dict(os.environ, {"GEMINI_API_KEY": "test-key"}),
-                patch.object(publish, "call_gemini", side_effect=[bad, bad]),
+                patch.object(publish, "call_polish_models", return_value=("gemini-3.8-flash", "응답이 아닙니다")),
                 patch.object(publish, "fetch_cover_image_bytes", side_effect=AssertionError("image api")),
                 redirect_stdout(io.StringIO()) as stdout,
             ):
-                with self.assertRaises(publish.PublishError):
-                    publish.publish(args)
-            self.assertNotIn("=== POLISHED START ===", stdout.getvalue())
+                self.assertIsNone(publish.publish(args))
+            text = stdout.getvalue()
+            self.assertIn("POLISH_STATUS: error reason=json", text)
+            self.assertLess(text.index("POLISH_STATUS:"), text.index("=== POLISHED START ==="))
+            self.assertEqual(polished_between_markers(text), original.strip("\n"))
             self.assertEqual(list(root.rglob("*")), [source])
 
     def test_publish_polish_does_not_print_review_markers(self) -> None:
         original = long_article()
-        good = original.replace("확인해야 합니다.", "점검해야 합니다.", 1)
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             source = root / "draft.md"
@@ -413,9 +437,15 @@ class PublishTests(unittest.TestCase):
                     str(root),
                 ]
             )
+            def fake_polish(api_key: str, system_prompt: str, user_prompt: str) -> tuple[str, str]:
+                return "gemini-3.8-flash", polish_json_from_prompt(
+                    user_prompt,
+                    lambda sentence: sentence.replace("확인해야 합니다.", "점검해야 합니다."),
+                )
+
             with (
                 patch.dict(os.environ, {"GEMINI_API_KEY": "test-key"}),
-                patch.object(publish, "call_gemini", return_value=good),
+                patch.object(publish, "call_polish_models", side_effect=fake_polish),
                 patch.object(publish, "fetch_cover_image_bytes", side_effect=AssertionError("image api")),
                 redirect_stdout(io.StringIO()) as stdout,
             ):
@@ -1260,6 +1290,15 @@ def polished_between_markers(text: str) -> str:
     start = text.index(start_mark) + len(start_mark)
     end = text.index(end_mark)
     return text[start:end].strip("\n")
+
+
+def polish_json_from_prompt(user_prompt: str, mutator) -> str:
+    payload = json.loads(user_prompt.split("SENTENCES_JSON:\n", 1)[1])
+    rows = [
+        {"id": item["id"], "text": mutator(item["text"]), "merged_with_next": False}
+        for item in payload
+    ]
+    return json.dumps(rows, ensure_ascii=False)
 
 
 def sample_post(title: str, date: str, category: str = "건강") -> str:
