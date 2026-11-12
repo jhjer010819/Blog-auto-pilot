@@ -115,7 +115,7 @@ export default async function PostPage({ params }: PostPageProps) {
   };
 
   return (
-    <main className="min-h-screen bg-white">
+    <main className="flex-1 bg-white">
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: serializeJsonLd(jsonLd) }}

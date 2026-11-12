@@ -10,6 +10,18 @@ export default function sitemap(): MetadataRoute.Sitemap {
       url: "https://blog.mymallow.cloud/",
       lastModified: posts[0]?.date,
     },
+    {
+      url: "https://blog.mymallow.cloud/about/",
+      lastModified: "2026-11-12",
+    },
+    {
+      url: "https://blog.mymallow.cloud/privacy/",
+      lastModified: "2026-11-12",
+    },
+    {
+      url: "https://blog.mymallow.cloud/terms/",
+      lastModified: "2026-11-12",
+    },
     ...posts.map((post) => ({
       url: `https://blog.mymallow.cloud/posts/${post.slug}/`,
       lastModified: post.date,

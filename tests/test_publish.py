@@ -89,6 +89,8 @@ class PublishTests(unittest.TestCase):
             self.assertNotIn("<!doctype", text.lower())
             self.assertNotIn("<html", text.lower())
             self.assertNotIn("함께 읽으면 유용한 정보", text)
+            self.assertNotIn("개인정보 처리방침", text)
+            self.assertNotIn("이용약관", text)
             self.assertNotIn("adsbygoogle", text)
             self.assertFalse((root / "index.html").exists())
             self.assertFalse((root / "post-template.html").exists())

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
+import { SiteFooter } from "@/components/site-footer";
 import { ADSENSE_ACCOUNT, defaultOgImage, SITE_DESCRIPTION, SITE_NAME, SITE_URL } from "@/lib/site";
 import "./globals.css";
 
@@ -33,7 +34,12 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="ko">
-      <body className="min-h-full antialiased">{children}</body>
+      <body className="min-h-full antialiased">
+        <div className="flex min-h-screen flex-col">
+          <div className="flex flex-1 flex-col">{children}</div>
+          <SiteFooter />
+        </div>
+      </body>
     </html>
   );
 }

@@ -21,7 +21,7 @@ export default function HomePage() {
   const posts = getPosts();
 
   return (
-    <main className="min-h-screen bg-[#f4f6fb]">
+    <main className="flex-1 bg-[#f4f6fb]">
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: serializeJsonLd(websiteJsonLd) }}
