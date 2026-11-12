@@ -79,7 +79,7 @@ python publish.py path/to/post.md --category 정부혜택 --polish
 python publish.py path/to/post.md --category 정부혜택 --push
 ```
 
-경로를 생략하면 `inbox/post.md`를 읽습니다. `--polish`는 `GEMINI_API_KEY`가 있을 때 `gemini-3.8-flash`로 문체만 다듬습니다. 숫자, 제목, 표의 행, 의학·정책 고지, 공백 포함 1800~2500자 범위가 깨지면 파일을 쓰지 않습니다. `--push`를 주지 않으면 커밋과 푸시를 하지 않고, 강제 푸시도 하지 않습니다.
+경로를 생략하면 `inbox/post.md`를 읽습니다. `--polish`는 선택입니다. `GEMINI_API_KEY`가 있을 때 본문 문장만 `gemini-3.8-flash`, `gemini-3.6-flash`, `gemini-3.5-flash-lite` 순으로 한 번 다듬습니다. 제목, 고지, 출처, 표, 코드, 굵은 라벨 줄은 모델에 보내지 않습니다. 숫자·고유명사·확실함·굵은 글씨가 바뀐 문장은 그 문장만 원문으로 되돌리고, 응답을 읽지 못하면 글 전체를 원문으로 둡니다. 표준 출력에 `POLISH_STATUS` 한 줄과 JSON 요약을 남깁니다. `--dry-run`과 함께 쓰면 그 다음에 다듬은 마크다운을 표시합니다. `--push`를 주지 않으면 커밋과 푸시를 하지 않고, 강제 푸시도 하지 않습니다.
 
 ### 분류
 
