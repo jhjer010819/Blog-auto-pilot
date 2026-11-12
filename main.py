@@ -1,13 +1,18 @@
 import json
-import math
 import os
-import re
 import time
 import urllib.request
 import xml.etree.ElementTree as ET
 
 import google.generativeai as genai
-from google.api_core.exceptions import ResourceExhausted
+from google.api_core.exceptions import (
+    DeadlineExceeded,
+    GatewayTimeout,
+    InternalServerError,
+    ResourceExhausted,
+    ServiceUnavailable,
+)
+from requests.exceptions import Timeout as RequestsTimeout
 
 import publish
 
@@ -22,9 +27,21 @@ model = genai.GenerativeModel('gemini-3.8-flash')
 # pytrends의 realtime/daily/hottrends 주소는 404다.
 # 한국 실시간 검색어는 구글 트렌드 공개 RSS로 가져온다.
 TRENDS_RSS_URL = "https://trends.google.com/trending/rss?geo=KR"
-# 무료 티어는 분당 5회다. 안내가 더 짧아도 1분은 기다려 창이 지나가게 한다.
-GEMINI_RPM_MIN_WAIT_SECONDS = 60
-_RETRY_AFTER_RE = re.compile(r"retry in\s+([0-9]+(?:\.[0-9]+)?)\s*s", re.IGNORECASE)
+# gapic 기본 timeout/retry는 600초다. 한 요청이 그 한도까지 멈추지 않게 90초로 끊는다.
+# 라이브러리의 503 재시도(최대 600초)는 끄고, 아래 횟수와 대기만 사용한다.
+# 최악: 90초 * 3회 + 대기 20초 + 60초 = 350초.
+GEMINI_REQUEST_TIMEOUT_SECONDS = 90
+GEMINI_MAX_ATTEMPTS = 3
+GEMINI_RETRY_BACKOFF_SECONDS = (20, 60)
+_RETRYABLE_GEMINI_ERRORS = (
+    DeadlineExceeded,
+    GatewayTimeout,
+    ServiceUnavailable,
+    InternalServerError,
+    ResourceExhausted,
+    TimeoutError,
+    RequestsTimeout,
+)
 
 # 수집이 완전히 실패했을 때만 쓰는 고정 샘플. 실시간 트렌드가 아니다.
 FALLBACK_SAMPLE_KEYWORDS = [
@@ -111,36 +128,58 @@ def filter_garbage(keywords_list):
     print(f"   └ 정제 후 키워드 풀: {clean_pool}")
     return clean_pool
 
-def _retry_after_seconds(exc):
-    match = _RETRY_AFTER_RE.search(str(exc))
-    if not match:
-        return None
-    return float(match.group(1))
-
-
-def _is_transient_rpm_limit(exc):
-    """분당 한도만 1회 재시도한다. 일일 한도 문구가 있으면 재시도하지 않는다."""
-    text = str(exc).lower()
-    if "per day" in text or "perday" in text:
+def _is_daily_quota(exc):
+    """일일 한도는 기다려도 풀리지 않으므로 재시도하지 않는다."""
+    if not isinstance(exc, ResourceExhausted):
         return False
-    if "per minute" in text or "perminute" in text:
+    text = str(exc).lower()
+    return "per day" in text or "perday" in text
+
+
+def _is_retryable_gemini_error(exc):
+    if _is_daily_quota(exc):
+        return False
+    if isinstance(exc, _RETRYABLE_GEMINI_ERRORS):
         return True
-    hint = _retry_after_seconds(exc)
-    return hint is not None and hint <= 120
+    return getattr(exc, "code", None) in {429, 500, 503, 504}
 
 
-def _rpm_wait_seconds(exc):
-    hint = _retry_after_seconds(exc)
-    if hint is None:
-        return float(GEMINI_RPM_MIN_WAIT_SECONDS)
-    return float(max(GEMINI_RPM_MIN_WAIT_SECONDS, math.ceil(hint)))
+def _gemini_error_label(exc):
+    code = getattr(exc, "code", None)
+    name = type(exc).__name__
+    if code:
+        return f"{code} {name}"
+    return name
 
 
 def _call_gemini(prompt):
-    return model.generate_content(
-        prompt,
-        generation_config={"response_mime_type": "application/json", "temperature": 0.2}
-    )
+    """JSON 응답을 요청한다. 각 호출은 90초를 넘기지 않고, 일시 오류는 최대 3회까지 다시 호출한다."""
+    for attempt in range(1, GEMINI_MAX_ATTEMPTS + 1):
+        try:
+            return model.generate_content(
+                prompt,
+                generation_config={"response_mime_type": "application/json", "temperature": 0.2},
+                request_options={"timeout": GEMINI_REQUEST_TIMEOUT_SECONDS, "retry": None},
+            )
+        except Exception as exc:
+            if _is_daily_quota(exc):
+                print("🚨 Gemini 할당량 초과입니다. 일일 한도로 보여 재시도하지 않고 종료합니다.")
+                raise
+            if not _is_retryable_gemini_error(exc) or attempt >= GEMINI_MAX_ATTEMPTS:
+                if _is_retryable_gemini_error(exc):
+                    print(
+                        f"🚨 Gemini 요청이 {GEMINI_MAX_ATTEMPTS}회 모두 실패했습니다. "
+                        f"재시도를 중단합니다. 원인: {exc}"
+                    )
+                raise
+            wait = GEMINI_RETRY_BACKOFF_SECONDS[attempt - 1]
+            print(
+                f"⏳ Gemini 일시 오류({_gemini_error_label(exc)})입니다. "
+                f"{wait:.0f}초 대기 후 {attempt + 1}번째 시도를 합니다. "
+                f"(최대 {GEMINI_MAX_ATTEMPTS}회) 원인: {exc}"
+            )
+            time.sleep(wait)
+            print(f"🔁 Gemini 요청을 재시도합니다. ({attempt + 1}/{GEMINI_MAX_ATTEMPTS})")
 
 
 def select_best_longtail_with_gemini(keywords_pool):
@@ -148,7 +187,8 @@ def select_best_longtail_with_gemini(keywords_pool):
     [3&4단계: 제미니 1차 판사]
     카테고리를 불문하고 오늘 작성 시 팩트 퀄리티와 SEO 유효기간이 가장 미친 1개 키워드 최종 픽.
     category는 키워드 수집 통이 아니라, 그 키워드로 쓸 글의 목적에 따라 허용된 아홉 가지 중 하나다.
-    분당 429는 약 1분(서버 안내가 더 길면 그 시간) 기다린 뒤 딱 한 번만 다시 호출한다.
+    504, 503, 500, 429, 시간 초과는 _call_gemini가 최대 3회(대기 20초, 60초) 다시 호출한다.
+    일일 한도는 재시도하지 않는다.
     """
     print("🤖 [3~4단계] 제미니 API가 전체 카테고리 중 최적의 1개 롱테일 최종 낙점 중...")
     
@@ -178,24 +218,7 @@ def select_best_longtail_with_gemini(keywords_pool):
     }}
     """
 
-    try:
-        response = _call_gemini(prompt)
-    except ResourceExhausted as exc:
-        if not _is_transient_rpm_limit(exc):
-            print("🚨 Gemini 할당량 초과입니다. 일일 한도로 보여 재시도하지 않고 종료합니다.")
-            raise
-        wait = _rpm_wait_seconds(exc)
-        hint = _retry_after_seconds(exc)
-        if hint is None:
-            print(f"⏳ Gemini 분당 요청 한도(429)입니다. 재시도 안내가 없어 {wait:.0f}초 대기 후 1회만 재시도합니다.")
-        else:
-            print(
-                f"⏳ Gemini 분당 요청 한도(429)입니다. "
-                f"서버 안내 {hint:.1f}초, 실제 대기 {wait:.0f}초 후 1회만 재시도합니다."
-            )
-        time.sleep(wait)
-        print("🔁 Gemini 요청을 1회 재시도합니다.")
-        response = _call_gemini(prompt)
+    response = _call_gemini(prompt)
 
     result = json.loads(response.text)
     if not isinstance(result, dict):
