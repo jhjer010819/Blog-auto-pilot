@@ -38,6 +38,7 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 jobs:
   publish-post:
@@ -101,3 +102,12 @@ jobs:
             cmd+=(--push)
           fi
           "${cmd[@]}"
+
+      # GITHUB_TOKEN 푸시는 push 이벤트로 다른 워크플로를 켜지 않는다.
+      # workflow_dispatch만 예외라서, main에 올린 뒤에 배포를 직접 요청한다.
+      # 재사용 워크플로는 이 실행의 시작 커밋을 체크아웃해서 방금 푸시한 글이 빠진다.
+      - name: main 푸시 뒤 페이지 배포
+        if: success() && inputs.push == true && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run deploy-pages.yml --ref main

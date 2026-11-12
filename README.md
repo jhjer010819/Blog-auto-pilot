@@ -55,7 +55,7 @@ npm run export
 
 GitHub Pages 배포는 `.github/workflows/deploy-pages.yml`입니다.
 
-- `main`에 사이트 소스 또는 이 워크플로가 푸시되면 실행됩니다. Actions 화면에서 수동 실행도 됩니다.
+- `main`에 사이트 소스 또는 이 워크플로가 푸시되면 실행됩니다. `GITHUB_TOKEN`으로 푸시하면 이 `push` 트리거는 켜지지 않습니다. 글 게시 워크플로가 `main`에 푸시하면 `workflow_dispatch`로 이 배포를 직접 호출합니다. Actions 화면에서 수동 실행도 됩니다.
 - 워크플로가 `npm run export`로 `out/`을 만들고, `actions/deploy-pages`로 게시합니다. 게시 루트에 `CNAME`(`blog.mymallow.cloud`)과 `.nojekyll`이 포함됩니다.
 - 배포 방식은 GitHub Actions입니다. `gh-pages` 브랜치를 만들지 않습니다.
 - 저장소 Pages 소스는 **GitHub Actions**여야 합니다. 한 번만 설정하면 이후 `main` 병합이 사이트를 갱신합니다.
@@ -103,7 +103,7 @@ python publish.py path/to/post.md --category 정부혜택 --push
 
 표지는 `--cover /images/name.jpg` 또는 front matter `cover`로 지정합니다. 그 이미지는 게시 전에 `public/images/name.jpg`로 저장소에 있어야 하고, 파일이 없으면 글을 만들지 않습니다. 표지를 비우면 API를 호출하지 않고 post-meta `cover`를 빈 문자열로 둡니다. 목록은 분류 이름 앞 두 글자를 기본 이미지로 보여 줍니다. `GEMINI_API_KEY`는 `--polish` 문체 다듬기에만 씁니다. `--push`는 글 HTML만 커밋합니다.
 
-`.github/workflows/publish_post.yml`은 수동 실행만 됩니다. 기본값은 `dry_run: true`, `push: false`입니다.
+`.github/workflows/publish_post.yml`은 수동 실행만 됩니다. 기본값은 `dry_run: true`, `push: false`입니다. `push: true`로 `main`에 푸시하면, 이어서 `deploy-pages.yml`을 `main`에서 실행합니다. 다른 브랜치에 푸시하면 페이지 배포는 호출하지 않습니다.
 
 ## 키워드 선별
 
