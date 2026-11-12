@@ -295,7 +295,6 @@ def test_dry_run_prints_status_before_polished_markdown(capsys, monkeypatch, tmp
         return "gemini-3.6-flash", _reply(user_prompt, _drift)
 
     monkeypatch.setattr(publish, "call_polish_models", fake)
-    monkeypatch.setattr(publish, "fetch_cover_image_bytes", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("image")))
     args = publish.parse_args(
         [
             str(MANUSCRIPT),

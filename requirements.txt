@@ -1,4 +1,2 @@
 google-generativeai
-google-genai
 markdown
-Pillow
