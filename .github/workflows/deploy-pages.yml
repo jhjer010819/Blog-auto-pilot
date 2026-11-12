@@ -58,7 +58,7 @@ jobs:
           test -f out/about/index.html
           test -f out/privacy/index.html
           test -f out/terms/index.html
-          grep -q '어바웃' out/index.html
+          grep -q '소개' out/index.html
           grep -q '개인정보 처리방침' out/index.html
           grep -q '이용약관' out/index.html
           grep -q '개인정보 처리방침' out/posts/2026-youth-rent-support/index.html

@@ -1,14 +1,14 @@
 import { InfoPage, infoMetadata } from "@/components/info-page";
 
 export const metadata = infoMetadata(
-  "어바웃",
+  "소개",
   "Mallow Info Lab은 정책과 생활 정보를 짧게 정리하는 블로그입니다. 운영 주체는 마이멜로(MyMallow)입니다.",
   "/about/",
 );
 
 export default function AboutPage() {
   return (
-    <InfoPage kicker="소개" title="어바웃" lede="정책과 생활 정보를 짧게 정리합니다.">
+    <InfoPage kicker="소개" title="소개" lede="정책과 생활 정보를 짧게 정리합니다.">
       <p>
         Mallow Info Lab은 매일 업데이트되는 핵심 정책과 생활 꿀팁을 모아 두는 블로그입니다. 지원
         금액처럼 자주 바뀌는 숫자보다, 신청 전에 빠지기 쉬운 기준, 서류, 시기를 먼저 짚습니다.

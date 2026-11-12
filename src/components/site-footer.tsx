@@ -1,7 +1,7 @@
 import Link from "next/link";
 
 const LINKS = [
-  { href: "/about/", label: "어바웃" },
+  { href: "/about/", label: "소개" },
   { href: "/privacy/", label: "개인정보 처리방침" },
   { href: "/terms/", label: "이용약관" },
 ] as const;
