@@ -9,6 +9,7 @@ from google.api_core.exceptions import (
     DeadlineExceeded,
     GatewayTimeout,
     InternalServerError,
+    NotFound,
     ResourceExhausted,
     ServiceUnavailable,
 )
@@ -23,16 +24,30 @@ if not GEMINI_API_KEY:
 
 genai.configure(api_key=GEMINI_API_KEY)
 model = genai.GenerativeModel('gemini-3.8-flash')
+gemini_model_used = None
 
 # pytrends의 realtime/daily/hottrends 주소는 404다.
 # 한국 실시간 검색어는 구글 트렌드 공개 RSS로 가져온다.
 TRENDS_RSS_URL = "https://trends.google.com/trending/rss?geo=KR"
-# gapic 기본 timeout/retry는 600초다. 한 요청이 그 한도까지 멈추지 않게 90초로 끊는다.
+# gapic 기본 timeout/retry는 600초다. 한 요청이 그 한도까지 멈추지 않게 모델마다 끊는다.
 # 라이브러리의 503 재시도(최대 600초)는 끄고, 아래 횟수와 대기만 사용한다.
-# 최악: 90초 * 3회 + 대기 20초 + 60초 = 350초.
+# GEMINI_MODELS가 비어 있으면 이 순서를 쓴다. 2.5 Flash는 신규 키에 열리지 않아 넣지 않는다.
+DEFAULT_GEMINI_MODELS = (
+    "gemini-3.8-flash",
+    "gemini-3.6-flash",
+    "gemini-3.5-flash-lite",
+)
+# 1번째 모델: 90초 * 3회 + 대기 20초 + 60초 = 350초.
+# 2번째 모델: 45초 * 2회 + 대기 15초 = 105초.
+# 3번째 이후: 30초 * 2회 + 대기 10초 = 70초.
+# 기본 3개 최악: 350 + 105 + 70 = 525초(8분 45초). 워크플로 제한 20분보다 짧다.
 GEMINI_REQUEST_TIMEOUT_SECONDS = 90
 GEMINI_MAX_ATTEMPTS = 3
 GEMINI_RETRY_BACKOFF_SECONDS = (20, 60)
+_GEMINI_FALLBACK_BUDGETS = (
+    (2, 45, (15,)),
+    (2, 30, (10,)),
+)
 _RETRYABLE_GEMINI_ERRORS = (
     DeadlineExceeded,
     GatewayTimeout,
@@ -129,7 +144,7 @@ def filter_garbage(keywords_list):
     return clean_pool
 
 def _is_daily_quota(exc):
-    """일일 한도는 기다려도 풀리지 않으므로 재시도하지 않는다."""
+    """일일 한도는 기다려도 풀리지 않으므로 재시도하지 않고, 다음 모델로도 넘어가지 않는다."""
     if not isinstance(exc, ResourceExhausted):
         return False
     text = str(exc).lower()
@@ -137,11 +152,21 @@ def _is_daily_quota(exc):
 
 
 def _is_retryable_gemini_error(exc):
-    if _is_daily_quota(exc):
+    if _is_daily_quota(exc) or _is_model_unavailable(exc):
         return False
     if isinstance(exc, _RETRYABLE_GEMINI_ERRORS):
         return True
     return getattr(exc, "code", None) in {429, 500, 503, 504}
+
+
+def _is_model_unavailable(exc):
+    """404, not found, not available은 같은 모델을 다시 부르지 않는다."""
+    if isinstance(exc, NotFound):
+        return True
+    if getattr(exc, "code", None) == 404:
+        return True
+    text = str(exc).lower().replace("_", " ")
+    return "not found" in text or "not available" in text
 
 
 def _gemini_error_label(exc):
@@ -152,34 +177,102 @@ def _gemini_error_label(exc):
     return name
 
 
+def _gemini_model_names():
+    raw = os.environ.get("GEMINI_MODELS", "")
+    names = tuple(part.strip() for part in raw.split(",") if part.strip())
+    return names or DEFAULT_GEMINI_MODELS
+
+
+def _gemini_attempt_budget(index):
+    """목록의 첫 모델만 긴 재시도를 쓰고, 뒤 모델은 더 짧은 예산을 각자 쓴다."""
+    if index <= 0:
+        return GEMINI_MAX_ATTEMPTS, GEMINI_REQUEST_TIMEOUT_SECONDS, GEMINI_RETRY_BACKOFF_SECONDS
+    fallback_index = min(index - 1, len(_GEMINI_FALLBACK_BUDGETS) - 1)
+    return _GEMINI_FALLBACK_BUDGETS[fallback_index]
+
+
+def _generative_model(name):
+    if name == "gemini-3.8-flash":
+        return model
+    return genai.GenerativeModel(name)
+
+
+def _log_model_skipped(name, names, index, exc):
+    if index + 1 < len(names):
+        print(
+            f"⚠️ Gemini 모델 {name}를 사용할 수 없습니다. "
+            f"다시 호출하지 않고 다음 모델 {names[index + 1]}로 넘어갑니다. 원인: {exc}"
+        )
+        return
+    print(f"🚨 Gemini 모델 {name}를 사용할 수 없고, 더 시도할 모델이 없습니다. 원인: {exc}")
+
+
+def _log_retries_exhausted(name, names, index, attempts, exc):
+    if index + 1 < len(names):
+        print(
+            f"🚨 Gemini 모델 {name} 요청이 {attempts}회 모두 실패했습니다. "
+            f"다음 모델 {names[index + 1]}로 넘어갑니다. 원인: {exc}"
+        )
+        return
+    print(
+        f"🚨 Gemini 요청이 {attempts}회 모두 실패했습니다. "
+        f"재시도를 중단합니다. 원인: {exc}"
+    )
+
+
 def _call_gemini(prompt):
-    """JSON 응답을 요청한다. 각 호출은 90초를 넘기지 않고, 일시 오류는 최대 3회까지 다시 호출한다."""
-    for attempt in range(1, GEMINI_MAX_ATTEMPTS + 1):
-        try:
-            return model.generate_content(
-                prompt,
-                generation_config={"response_mime_type": "application/json", "temperature": 0.2},
-                request_options={"timeout": GEMINI_REQUEST_TIMEOUT_SECONDS, "retry": None},
-            )
-        except Exception as exc:
-            if _is_daily_quota(exc):
-                print("🚨 Gemini 할당량 초과입니다. 일일 한도로 보여 재시도하지 않고 종료합니다.")
-                raise
-            if not _is_retryable_gemini_error(exc) or attempt >= GEMINI_MAX_ATTEMPTS:
-                if _is_retryable_gemini_error(exc):
-                    print(
-                        f"🚨 Gemini 요청이 {GEMINI_MAX_ATTEMPTS}회 모두 실패했습니다. "
-                        f"재시도를 중단합니다. 원인: {exc}"
-                    )
-                raise
-            wait = GEMINI_RETRY_BACKOFF_SECONDS[attempt - 1]
-            print(
-                f"⏳ Gemini 일시 오류({_gemini_error_label(exc)})입니다. "
-                f"{wait:.0f}초 대기 후 {attempt + 1}번째 시도를 합니다. "
-                f"(최대 {GEMINI_MAX_ATTEMPTS}회) 원인: {exc}"
-            )
-            time.sleep(wait)
-            print(f"🔁 Gemini 요청을 재시도합니다. ({attempt + 1}/{GEMINI_MAX_ATTEMPTS})")
+    """JSON 응답을 요청한다.
+
+    모델마다 일시 오류(503, 504, 500, 429, 시간 초과)를 그 모델의 횟수만큼 다시 호출한다.
+    첫 모델은 90초·3회(대기 20초, 60초)이고, 이후 모델은 더 짧은 예산을 쓴다.
+    404 / not found / not available 은 대기 없이 다음 모델로 넘어간다.
+    일일 한도는 재시도하지 않고, 다음 모델로도 넘어가지 않는다.
+    """
+    global gemini_model_used
+    gemini_model_used = None
+    names = _gemini_model_names()
+    for index, name in enumerate(names):
+        attempts, timeout, backoff = _gemini_attempt_budget(index)
+        client = _generative_model(name)
+        print(
+            f"🤖 Gemini 모델 {name}로 요청합니다. "
+            f"({index + 1}/{len(names)}번째 모델, 최대 {attempts}회)"
+        )
+        for attempt in range(1, attempts + 1):
+            try:
+                response = client.generate_content(
+                    prompt,
+                    generation_config={"response_mime_type": "application/json", "temperature": 0.2},
+                    request_options={"timeout": timeout, "retry": None},
+                )
+            except Exception as exc:
+                if _is_daily_quota(exc):
+                    print("🚨 Gemini 할당량 초과입니다. 일일 한도로 보여 재시도하지 않고 종료합니다.")
+                    raise
+                if _is_model_unavailable(exc):
+                    _log_model_skipped(name, names, index, exc)
+                    if index + 1 >= len(names):
+                        raise
+                    break
+                if not _is_retryable_gemini_error(exc) or attempt >= attempts:
+                    if _is_retryable_gemini_error(exc):
+                        _log_retries_exhausted(name, names, index, attempts, exc)
+                        if index + 1 < len(names):
+                            break
+                    raise
+                wait = backoff[attempt - 1]
+                print(
+                    f"⏳ Gemini 일시 오류({_gemini_error_label(exc)})입니다. "
+                    f"모델 {name}. {wait:.0f}초 대기 후 {attempt + 1}번째 시도를 합니다. "
+                    f"(최대 {attempts}회) 원인: {exc}"
+                )
+                time.sleep(wait)
+                print(f"🔁 Gemini 요청을 재시도합니다. 모델 {name} ({attempt + 1}/{attempts})")
+                continue
+            gemini_model_used = name
+            print(f"✅ Gemini 최종 사용 모델: {name}")
+            return response
+    raise RuntimeError("Gemini 모델 목록이 비어 있습니다.")
 
 
 def select_best_longtail_with_gemini(keywords_pool):
@@ -187,8 +280,9 @@ def select_best_longtail_with_gemini(keywords_pool):
     [3&4단계: 제미니 1차 판사]
     카테고리를 불문하고 오늘 작성 시 팩트 퀄리티와 SEO 유효기간이 가장 미친 1개 키워드 최종 픽.
     category는 키워드 수집 통이 아니라, 그 키워드로 쓸 글의 목적에 따라 허용된 아홉 가지 중 하나다.
-    504, 503, 500, 429, 시간 초과는 _call_gemini가 최대 3회(대기 20초, 60초) 다시 호출한다.
-    일일 한도는 재시도하지 않는다.
+    504, 503, 500, 429, 시간 초과는 모델마다 다시 호출하고, 그 예산을 다 쓰면 다음 모델로 넘어간다.
+    404 / not found / not available 은 그 모델을 다시 부르지 않는다.
+    일일 한도는 재시도하지 않고 다음 모델로도 넘어가지 않는다.
     """
     print("🤖 [3~4단계] 제미니 API가 전체 카테고리 중 최적의 1개 롱테일 최종 낙점 중...")
     
@@ -246,4 +340,5 @@ if __name__ == "__main__":
     print(f"📌 선택 씨앗 단어: {result.get('selected_seed')}")
     print(f"💡 선택 이유: {result.get('reason')}")
     print(f"🚀 확정 롱테일 제목: {result.get('longtail_title')}")
+    print(f"🤖 최종 사용 모델: {gemini_model_used}")
     print("==========================================")
