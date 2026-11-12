@@ -1,4 +1,3 @@
-import base64
 import io
 import json
 import os
@@ -9,7 +8,7 @@ import textwrap
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -24,6 +23,14 @@ APPROVED_TITLE = "사관학교 신체검사 불합격 기준과 입시 지원자
 def write_text(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
+
+
+def place_cover(root: Path, cover: str = "/images/cover.jpg") -> Path:
+    name = cover[len("/images/") :]
+    path = root / "public" / "images" / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"cover-bytes")
+    return path
 
 
 def run_publish(root: Path, *args: str, env: dict | None = None) -> subprocess.CompletedProcess[str]:
@@ -42,6 +49,7 @@ class PublishTests(unittest.TestCase):
     def test_fixture_becomes_post_fragment(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            place_cover(root)
             result = run_publish(
                 root,
                 str(FIXTURE),
@@ -99,6 +107,7 @@ class PublishTests(unittest.TestCase):
     def test_same_slug_updates_in_place(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            place_cover(root)
             first = root / "first.md"
             second = root / "second.md"
             write_text(first, "# 첫 제목\n\n본문입니다.\n")
@@ -131,6 +140,7 @@ class PublishTests(unittest.TestCase):
     def test_auto_related_uses_newest_posts_and_skips_self(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            place_cover(root)
             posts = root / "content" / "posts"
             write_text(posts / "older.html", sample_post("오래된 글", "2020-01-01"))
             write_text(posts / "newer.html", sample_post("최근 글", "2026-02-02"))
@@ -163,6 +173,7 @@ class PublishTests(unittest.TestCase):
     def test_front_matter_and_explicit_related(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            place_cover(root)
             source = root / "post.md"
             write_text(
                 source,
@@ -213,8 +224,8 @@ class PublishTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("파일은 쓰지 않았습니다", result.stdout)
             self.assertIn("푸시: 하지 않음", result.stdout)
-            self.assertIn("320×320 JPEG를 생성합니다", result.stdout)
-            self.assertIn("이미지 API를 호출하지 않고", result.stdout)
+            self.assertIn("표지: 없음 (분류 기본 이미지 사용)", result.stdout)
+            self.assertNotIn("이미지 API", result.stdout)
             self.assertEqual(list((root / "content").glob("**/*")), [])
 
     def test_failures_exit_nonzero(self) -> None:
@@ -338,16 +349,13 @@ class PublishTests(unittest.TestCase):
             with (
                 patch.dict(os.environ, {"GEMINI_API_KEY": "test-key"}),
                 patch.object(publish, "call_gemini", side_effect=[bad, good]) as gemini,
-                patch.object(publish, "fetch_cover_image_bytes", side_effect=AssertionError("image api")),
-                patch.object(publish, "request_cover_stem", side_effect=AssertionError("name api")),
                 redirect_stdout(io.StringIO()) as stdout,
             ):
                 self.assertIsNone(publish.publish(args))
             self.assertEqual(gemini.call_count, 2)
             text = stdout.getvalue()
             self.assertIn("파일은 쓰지 않았습니다", text)
-            self.assertIn("이미지 API를 호출하지 않고", text)
-            self.assertIn("320×320 JPEG를 생성합니다", text)
+            self.assertIn("표지: 없음 (분류 기본 이미지 사용)", text)
             body = polished_between_markers(text)
             self.assertEqual(body, good.strip("\n"))
             self.assertIn("점검해야 합니다.", body)
@@ -381,7 +389,6 @@ class PublishTests(unittest.TestCase):
             with (
                 patch.dict(os.environ, {"GEMINI_API_KEY": "test-key"}),
                 patch.object(publish, "call_gemini", side_effect=[bad, bad]),
-                patch.object(publish, "fetch_cover_image_bytes", side_effect=AssertionError("image api")),
                 redirect_stdout(io.StringIO()) as stdout,
             ):
                 with self.assertRaises(publish.PublishError):
@@ -394,6 +401,7 @@ class PublishTests(unittest.TestCase):
         good = original.replace("확인해야 합니다.", "점검해야 합니다.", 1)
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            place_cover(root)
             source = root / "draft.md"
             write_text(source, original)
             args = publish.parse_args(
@@ -416,7 +424,6 @@ class PublishTests(unittest.TestCase):
             with (
                 patch.dict(os.environ, {"GEMINI_API_KEY": "test-key"}),
                 patch.object(publish, "call_gemini", return_value=good),
-                patch.object(publish, "fetch_cover_image_bytes", side_effect=AssertionError("image api")),
                 redirect_stdout(io.StringIO()) as stdout,
             ):
                 destination = publish.publish(args)
@@ -457,6 +464,7 @@ class PublishTests(unittest.TestCase):
 
             source = work / "draft.md"
             write_text(source, "# 푸시 확인\n\n본문입니다.\n")
+            place_cover(work)
             result = run_publish(
                 work,
                 str(source),
@@ -482,6 +490,7 @@ class PublishTests(unittest.TestCase):
             )
             self.assertIn("글 게시: 푸시 확인", shown.stdout)
             self.assertIn("content/posts/push-check.html", shown.stdout)
+            self.assertNotIn("public/images/cover.jpg", shown.stdout)
             self.assertNotIn("notes.txt", shown.stdout)
             self.assertTrue((work / "notes.txt").is_file())
             staged = subprocess.run(
@@ -507,19 +516,28 @@ class PublishTests(unittest.TestCase):
         self.assertNotIn("pull_request:", head)
         self.assertNotIn("\n  push:", head)
         self.assertIn("contents: write", stage2)
+        self.assertIn("actions: write", stage2)
         self.assertIn("secrets.GEMINI_API_KEY", stage2)
+        self.assertIn("gh workflow run deploy-pages.yml --ref main", jobs)
+        self.assertIn("GH_TOKEN: ${{ github.token }}", jobs)
+        self.assertIn("success() && inputs.push == true && github.ref == 'refs/heads/main'", jobs)
+        deploy = (ROOT / ".github" / "workflows" / "deploy-pages.yml").read_text(encoding="utf-8")
+        self.assertIn("workflow_dispatch:", deploy)
         self.assertIn("python publish.py", jobs)
         self.assertIn('default: true', stage2)
         self.assertIn('default: false', stage2)
         self.assertIn('cmd+=(--cover "$COVER")', jobs)
+        self.assertIn("public/images", head)
+        self.assertNotIn("320", head)
         self.assertIn("polished_path:", head)
         self.assertIn("POLISHED_PATH:", jobs)
         self.assertIn('source_path="$POLISHED_PATH"', jobs)
         self.assertIn("use_polish=true", jobs)
         publisher = (ROOT / "publish.py").read_text(encoding="utf-8")
         self.assertIn("gemini-3.8-flash", publisher)
-        self.assertIn("gemini-nano-banana-2.1", publisher)
-        self.assertIn('"image_size": "1K"', publisher)
+        self.assertNotIn("gemini-nano-banana", publisher)
+        self.assertNotIn("build_generated_cover", publisher)
+        self.assertIn("표지: 없음 (분류 기본 이미지 사용)", publisher)
         self.assertIn("=== POLISHED START ===", publisher)
         self.assertIn("=== POLISHED END ===", publisher)
 
@@ -585,6 +603,7 @@ class PublishTests(unittest.TestCase):
         self.assertLessEqual(len(expected), 80)
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            place_cover(root)
             source = root / "post-20261111.md"
             write_text(source, f"# {APPROVED_TITLE}\n\n본문입니다.\n")
             result = run_publish(
@@ -621,6 +640,7 @@ class PublishTests(unittest.TestCase):
     def test_related_reads_current_info_lab_posts(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            place_cover(root)
             posts = root / "content" / "posts"
             write_text(
                 posts / "2026-youth-rent-support.html",
@@ -653,9 +673,11 @@ class PublishTests(unittest.TestCase):
                 ],
             )
 
-    def test_provided_cover_skips_generation_without_api_key(self) -> None:
+    def test_provided_cover_uses_existing_file_without_api_key(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            image = place_cover(root, "/images/given.jpg")
+            before = image.read_bytes()
             env = os.environ.copy()
             env.pop("GEMINI_API_KEY", None)
             result = run_publish(
@@ -677,274 +699,198 @@ class PublishTests(unittest.TestCase):
                 (root / "content" / "posts" / "has-cover.html").read_text(encoding="utf-8")
             )
             self.assertEqual(meta["cover"], "/images/given.jpg")
-            self.assertFalse((root / "public" / "images").exists())
-            self.assertNotIn("이미지 API를 호출하지 않고", result.stdout)
+            self.assertEqual(image.read_bytes(), before)
+            self.assertEqual(list((root / "public" / "images").iterdir()), [image])
             self.assertIn("표지: /images/given.jpg", result.stdout)
+            self.assertNotIn("분류 기본 이미지", result.stdout)
 
-    def test_dry_run_with_key_does_not_call_image_api(self) -> None:
+    def test_empty_cover_keeps_blank_and_skips_api(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             source = root / "draft.md"
-            write_text(source, "# 제목\n\n본문입니다.\n")
-            args = cover_args(root, source, "dry-cover")
-            args.dry_run = True
-            with (
-                patch.object(publish, "fetch_cover_image_bytes", side_effect=AssertionError("image api")),
-                patch.object(publish, "request_cover_stem", side_effect=AssertionError("name api")),
-                patch.dict(os.environ, {"GEMINI_API_KEY": "present"}),
-                redirect_stdout(io.StringIO()) as stdout,
-            ):
-                self.assertIsNone(publish.publish(args))
-            self.assertIn("이미지 API를 호출하지 않고", stdout.getvalue())
-            self.assertEqual(list(root.rglob("*")), [source])
-
-    def test_generates_320_cover_when_missing(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            source = root / "draft.md"
-            write_text(source, "# 검진 안내\n\n본문입니다.\n")
-            args = cover_args(root, source, "exam-note", category="건강")
-            with (
-                patch.object(publish, "request_cover_stem", return_value="clinic-room") as stem,
-                patch.object(publish, "fetch_cover_image_bytes", return_value=png_bytes(120, 80)) as fetch,
-                patch.dict(os.environ, {"GEMINI_API_KEY": "test-key"}),
-            ):
-                destination = publish.publish(args)
-            stem.assert_called_once()
-            self.assertEqual(fetch.call_count, 1)
-            prompt = fetch.call_args.args[1]
-            self.assertIn("검진 안내", prompt)
-            self.assertIn("건강", prompt)
-            self.assertIn("1K", (ROOT / "publish.py").read_text(encoding="utf-8"))
-            image = root / "public" / "images" / "clinic-room.jpg"
-            self.assertTrue(image.is_file())
-            meta, _body = publish.parse_post_file(destination.read_text(encoding="utf-8"))
-            self.assertEqual(meta["cover"], "/images/clinic-room.jpg")
-            self.assertEqual(jpeg_size(image.read_bytes()), (320, 320, "RGB"))
-            self.assertLessEqual(image.stat().st_size, 20 * 1024)
-
-    def test_generated_cover_does_not_overwrite_an_existing_file(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            existing = root / "public" / "images" / "clinic-room.jpg"
-            write_text(existing, "keep")
-            source = root / "draft.md"
-            write_text(source, "# 검진 안내\n\n본문입니다.\n")
-            args = cover_args(root, source, "exam-note", category="건강")
-            with (
-                patch.object(publish, "request_cover_stem", return_value="clinic-room"),
-                patch.object(publish, "fetch_cover_image_bytes", return_value=png_bytes(40, 40)),
-                patch.dict(os.environ, {"GEMINI_API_KEY": "test-key"}),
-            ):
-                destination = publish.publish(args)
-            self.assertEqual(existing.read_text(encoding="utf-8"), "keep")
-            meta, _body = publish.parse_post_file(destination.read_text(encoding="utf-8"))
-            self.assertEqual(meta["cover"], "/images/clinic-room-2.jpg")
-            self.assertEqual(jpeg_size((root / "public" / "images" / "clinic-room-2.jpg").read_bytes())[:2], (320, 320))
-
-    def test_missing_cover_api_key_writes_nothing(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
+            write_text(source, "# 표지 없는 글\n\n본문입니다.\n")
             env = os.environ.copy()
-            env.pop("GEMINI_API_KEY", None)
+            env["GEMINI_API_KEY"] = "should-not-be-used"
             result = run_publish(
                 root,
-                str(FIXTURE),
+                str(source),
                 "--category",
-                "생활정보",
+                "건강",
                 "--slug",
-                "no-key",
+                "no-cover",
                 "--date",
-                "2026-11-10",
+                "2026-11-12",
                 "--no-related",
                 env=env,
             )
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn("GEMINI_API_KEY", result.stderr)
-            self.assertIn("표지", result.stderr)
-            self.assertFalse((root / "content").exists())
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("표지: 없음 (분류 기본 이미지 사용)", result.stdout)
+            meta, _body = publish.parse_post_file(
+                (root / "content" / "posts" / "no-cover.html").read_text(encoding="utf-8")
+            )
+            self.assertEqual(meta["cover"], "")
             self.assertFalse((root / "public").exists())
 
-    def test_cover_generation_failure_writes_nothing(self) -> None:
+            args = publish.parse_args(
+                [
+                    str(source),
+                    "--category",
+                    "건강",
+                    "--slug",
+                    "no-cover-api",
+                    "--date",
+                    "2026-11-12",
+                    "--no-related",
+                    "--root",
+                    str(root),
+                ]
+            )
+            with (
+                patch.object(publish, "call_gemini", side_effect=AssertionError("api")),
+                redirect_stdout(io.StringIO()) as stdout,
+            ):
+                destination = publish.publish(args)
+            self.assertIsNotNone(destination)
+            self.assertIn("표지: 없음 (분류 기본 이미지 사용)", stdout.getvalue())
+            written, _body = publish.parse_post_file(destination.read_text(encoding="utf-8"))
+            self.assertEqual(written["cover"], "")
+
+    def test_empty_front_matter_cover_uses_category_placeholder(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "draft.md"
+            write_text(
+                source,
+                textwrap.dedent(
+                    """\
+                    ---
+                    title: 빈 표지
+                    category: 생활정보
+                    date: 2026-11-12
+                    slug: blank-cover
+                    cover:
+                    ---
+                    # 빈 표지
+
+                    본문입니다.
+                    """
+                ),
+            )
+            env = os.environ.copy()
+            env.pop("GEMINI_API_KEY", None)
+            result = run_publish(root, str(source), "--no-related", env=env)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("표지: 없음 (분류 기본 이미지 사용)", result.stdout)
+            meta, _body = publish.parse_post_file(
+                (root / "content" / "posts" / "blank-cover.html").read_text(encoding="utf-8")
+            )
+            self.assertEqual(meta["cover"], "")
+            self.assertFalse((root / "public").exists())
+
+    def test_missing_cover_file_fails_before_writing_or_api(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "draft.md"
+            write_text(source, "# 없는 표지\n\n본문입니다.\n")
+            result = run_publish(
+                root,
+                str(source),
+                "--category",
+                "생활정보",
+                "--slug",
+                "missing-cover",
+                "--date",
+                "2026-11-12",
+                "--no-related",
+                "--cover",
+                "/images/missing.jpg",
+                "--dry-run",
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("표지 파일이 없습니다", result.stderr)
+            self.assertIn("public/images/missing.jpg", result.stderr)
+            self.assertIn("--cover", result.stderr)
+            self.assertFalse((root / "content").exists())
+
+            args = publish.parse_args(
+                [
+                    str(source),
+                    "--category",
+                    "생활정보",
+                    "--slug",
+                    "missing-cover",
+                    "--date",
+                    "2026-11-12",
+                    "--no-related",
+                    "--cover",
+                    "/images/missing.jpg",
+                    "--polish",
+                    "--root",
+                    str(root),
+                ]
+            )
+            with (
+                patch.dict(os.environ, {"GEMINI_API_KEY": "test-key"}),
+                patch.object(publish, "call_gemini", side_effect=AssertionError("api")),
+            ):
+                with self.assertRaises(publish.PublishError) as caught:
+                    publish.publish(args)
+            self.assertIn("표지 파일이 없습니다", str(caught.exception))
+            self.assertIn("public/images/missing.jpg", str(caught.exception))
+            self.assertFalse((root / "content").exists())
+
+    def test_front_matter_cover_must_exist_in_public_images(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "draft.md"
+            write_text(
+                source,
+                textwrap.dedent(
+                    """\
+                    ---
+                    category: 건강
+                    cover: /images/clinic.jpg
+                    ---
+                    # 검진 안내
+
+                    본문입니다.
+                    """
+                ),
+            )
+            missing = run_publish(root, str(source), "--no-related")
+            self.assertNotEqual(missing.returncode, 0)
+            self.assertIn("표지 파일이 없습니다", missing.stderr)
+            self.assertIn("public/images/clinic.jpg", missing.stderr)
+            self.assertFalse((root / "content").exists())
+
+            place_cover(root, "/images/clinic.jpg")
+            found = run_publish(root, str(source), "--slug", "clinic-note", "--no-related")
+            self.assertEqual(found.returncode, 0, found.stderr)
+            meta, _body = publish.parse_post_file(
+                (root / "content" / "posts" / "clinic-note.html").read_text(encoding="utf-8")
+            )
+            self.assertEqual(meta["cover"], "/images/clinic.jpg")
+
+    def test_unsafe_cover_path_fails_early(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             source = root / "draft.md"
             write_text(source, "# 제목\n\n본문입니다.\n")
-            args = cover_args(root, source, "failed-cover")
-            with (
-                patch.object(publish, "request_cover_stem", return_value="quiet-desk"),
-                patch.object(
-                    publish,
-                    "fetch_cover_image_bytes",
-                    side_effect=publish.PublishError("표지 이미지를 만들지 못했습니다: 503"),
-                ),
-                patch.dict(os.environ, {"GEMINI_API_KEY": "test-key"}),
-            ):
-                with self.assertRaises(publish.PublishError) as caught:
-                    publish.publish(args)
-            self.assertIn("표지 이미지", str(caught.exception))
+            outside = root / "secret.jpg"
+            outside.write_bytes(b"nope")
+            result = run_publish(
+                root,
+                str(source),
+                "--category",
+                "생활정보",
+                "--no-related",
+                "--cover",
+                "/images/../secret.jpg",
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("표지 경로가 올바르지 않습니다", result.stderr)
             self.assertFalse((root / "content").exists())
-            self.assertFalse((root / "public" / "images").exists())
-
-    def test_cover_request_uses_smallest_square_output_and_retries(self) -> None:
-        calls: list[dict] = []
-
-        class Interactions:
-            def create(self, **kwargs):
-                calls.append(kwargs)
-                if len(calls) == 1:
-                    raise RuntimeError("temporary")
-                return Mock(output_image=Mock(data=base64.b64encode(b"\xff\xd8jpeg").decode()))
-
-        class Client:
-            def __init__(self, api_key):
-                self.api_key = api_key
-                self.interactions = Interactions()
-
-        created: list[Client] = []
-
-        def client_factory(*_args, **kwargs):
-            client = Client(kwargs.get("api_key"))
-            created.append(client)
-            return client
-
-        fake = Mock()
-        fake.Client = client_factory
-        with (
-            patch.object(publish, "load_genai", return_value=fake),
-            patch.object(publish.time, "sleep") as sleep,
-        ):
-            data = publish.fetch_cover_image_bytes("secret", "a quiet room")
-        self.assertEqual(data, b"\xff\xd8jpeg")
-        self.assertEqual(len(calls), 2)
-        self.assertEqual(calls[0]["model"], "gemini-nano-banana-2.1")
-        self.assertEqual(calls[0]["input"], "a quiet room")
-        self.assertEqual(calls[0]["response_format"]["image_size"], "1K")
-        self.assertEqual(calls[0]["response_format"]["aspect_ratio"], "1:1")
-        self.assertEqual(calls[0]["response_format"]["mime_type"], "image/jpeg")
-        self.assertNotIn("2K", json.dumps(calls))
-        self.assertNotIn("4K", json.dumps(calls))
-        sleep.assert_called_once()
-        self.assertEqual(created[0].api_key, "secret")
-
-    def test_cover_request_fails_after_retry(self) -> None:
-        class Interactions:
-            calls = 0
-
-            def create(self, **_kwargs):
-                Interactions.calls += 1
-                raise RuntimeError("still down")
-
-        fake = Mock()
-        fake.Client.return_value.interactions = Interactions()
-        with (
-            patch.object(publish, "load_genai", return_value=fake),
-            patch.object(publish.time, "sleep") as sleep,
-        ):
-            with self.assertRaises(publish.PublishError) as caught:
-                publish.fetch_cover_image_bytes("secret", "prompt")
-        self.assertIn("still down", str(caught.exception))
-        self.assertEqual(Interactions.calls, 2)
-        sleep.assert_called_once()
-
-    def test_normalize_cover_jpeg_downscales_and_compresses(self) -> None:
-        from PIL import Image
-
-        rng_colors = [(index * 37) % 256 for index in range(256)]
-        image = Image.new("RGB", (1024, 640))
-        pixels = image.load()
-        for y in range(0, 640, 4):
-            for x in range(0, 1024, 4):
-                color = (
-                    rng_colors[(x + y) % 256],
-                    rng_colors[(x * 3 + y) % 256],
-                    rng_colors[(x + y * 5) % 256],
-                )
-                for dy in range(4):
-                    for dx in range(4):
-                        pixels[x + dx, y + dy] = color
-        buffer = io.BytesIO()
-        image.save(buffer, format="PNG")
-        jpeg = publish.normalize_cover_jpeg(buffer.getvalue())
-        self.assertEqual(jpeg_size(jpeg), (320, 320, "RGB"))
-        self.assertLessEqual(len(jpeg), 20 * 1024)
-        self.assertGreater(len(jpeg), 1024)
-
-    def test_cover_stem_is_short_english_kebab(self) -> None:
-        self.assertEqual(publish.normalize_cover_stem("Clinic Room\nextra"), "clinic-room")
-        self.assertEqual(publish.normalize_cover_stem("`Year_End_Tax.jpg`"), "year-end-tax")
-        self.assertEqual(publish.validate_cover_stem("youth-rent"), "youth-rent")
-        with self.assertRaises(publish.PublishError):
-            publish.validate_cover_stem("cover")
-        with self.assertRaises(publish.PublishError):
-            publish.validate_cover_stem("blog-photo")
-        with patch.object(publish, "call_gemini", side_effect=["cover", "clinic-room"]) as call:
-            self.assertEqual(publish.request_cover_stem("key", "제목", "건강"), "clinic-room")
-        self.assertEqual(call.call_count, 2)
-        with patch.object(publish, "call_gemini", side_effect=["!!!", "photo"]):
-            with self.assertRaises(publish.PublishError) as caught:
-                publish.request_cover_stem("key", "제목", "건강")
-        self.assertIn("짧은 영문", str(caught.exception))
-
-    def test_push_commits_generated_cover_with_the_post(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            tmp_path = Path(tmp)
-            bare = tmp_path / "origin.git"
-            work = tmp_path / "work"
-            subprocess.run(["git", "init", "--bare", "-b", "main", str(bare)], check=True, capture_output=True)
-            subprocess.run(["git", "init", "-b", "main", str(work)], check=True, capture_output=True)
-            git_config(work)
-            write_text(work / "README.md", "base\n")
-            subprocess.run(["git", "add", "README.md"], cwd=work, check=True)
-            subprocess.run(["git", "commit", "-m", "base"], cwd=work, check=True, capture_output=True)
-            subprocess.run(["git", "remote", "add", "origin", str(bare)], cwd=work, check=True)
-            subprocess.run(["git", "push", "origin", "HEAD"], cwd=work, check=True, capture_output=True)
-            write_text(work / "notes.txt", "남으면 안 되는 파일\n")
-            subprocess.run(["git", "add", "notes.txt"], cwd=work, check=True)
-
-            source = work / "draft.md"
-            write_text(source, "# 푸시 표지\n\n본문입니다.\n")
-            args = cover_args(work, source, "push-cover")
-            args.push = True
-            with (
-                patch.object(publish, "request_cover_stem", return_value="quiet-desk"),
-                patch.object(publish, "fetch_cover_image_bytes", return_value=png_bytes(64, 40)),
-                patch.dict(os.environ, {"GEMINI_API_KEY": "test-key"}),
-            ):
-                publish.publish(args)
-
-            shown = subprocess.run(
-                ["git", "show", "--name-only", "--pretty=format:%s", "HEAD"],
-                cwd=bare,
-                capture_output=True,
-                text=True,
-                check=True,
-            )
-            self.assertIn("글 게시: 푸시 표지", shown.stdout)
-            self.assertIn("content/posts/push-cover.html", shown.stdout)
-            self.assertIn("public/images/quiet-desk.jpg", shown.stdout)
-            self.assertNotIn("notes.txt", shown.stdout)
-            self.assertTrue((work / "notes.txt").is_file())
-            staged = subprocess.run(
-                ["git", "diff", "--cached", "--name-only"],
-                cwd=work,
-                capture_output=True,
-                text=True,
-                check=True,
-            )
-            self.assertIn("notes.txt", staged.stdout)
-            self.assertEqual(
-                jpeg_size((work / "public" / "images" / "quiet-desk.jpg").read_bytes())[:2],
-                (320, 320),
-            )
-
-    def test_image_libraries_import_without_breaking_text_gemini(self) -> None:
-        genai = publish.load_genai()
-        self.assertTrue(hasattr(genai, "Client"))
-        import google.generativeai as generativeai
-
-        self.assertTrue(hasattr(generativeai, "GenerativeModel"))
-
+            self.assertEqual(outside.read_bytes(), b"nope")
 
     def test_category_allowlist_accepts_nine_labels_and_rejects_others(self) -> None:
         expected = (
@@ -1109,6 +1055,7 @@ class PublishTests(unittest.TestCase):
     def test_publish_related_prefers_same_category_and_skips_tool_links(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            place_cover(root)
             posts = root / "content" / "posts"
             write_text(posts / "old-health.html", sample_post("오래된 건강 글", "2020-01-01", "건강"))
             tool_meta = {
@@ -1182,6 +1129,7 @@ class PublishTests(unittest.TestCase):
     def test_publish_related_falls_back_when_category_has_no_siblings(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            place_cover(root)
             posts = root / "content" / "posts"
             write_text(posts / "tax.html", sample_post("세금 글", "2026-01-01", "세금"))
             write_text(posts / "it.html", sample_post("IT 글", "2026-03-03", "IT"))
@@ -1295,39 +1243,6 @@ def info_lab_post(title: str, date: str) -> str:
     }
     payload = json.dumps(meta, ensure_ascii=False, indent=2)
     return f'<script type="application/json" id="post-meta">\n{payload}\n</script>\n<p>본문</p>\n'
-
-
-def cover_args(root: Path, source: Path, slug: str, category: str = "생활정보") -> publish.argparse.Namespace:
-    return publish.parse_args(
-        [
-            str(source),
-            "--category",
-            category,
-            "--slug",
-            slug,
-            "--date",
-            "2026-11-11",
-            "--no-related",
-            "--root",
-            str(root),
-        ]
-    )
-
-
-def png_bytes(width: int, height: int) -> bytes:
-    from PIL import Image
-
-    image = Image.new("RGB", (width, height), (180, 90, 40))
-    buffer = io.BytesIO()
-    image.save(buffer, format="PNG")
-    return buffer.getvalue()
-
-
-def jpeg_size(data: bytes) -> tuple[int, int, str]:
-    from PIL import Image
-
-    with Image.open(io.BytesIO(data)) as image:
-        return image.size[0], image.size[1], image.mode
 
 
 def git_config(repo: Path) -> None:
