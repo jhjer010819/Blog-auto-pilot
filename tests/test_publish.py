@@ -171,6 +171,7 @@ class PublishTests(unittest.TestCase):
                     ---
                     title: 프론트 제목
                     category: 정책·제도
+                    description: 지정한 설명입니다.
                     date: 2026-03-03
                     slug: front-slug
                     cover: /images/cover.jpg
@@ -191,6 +192,7 @@ class PublishTests(unittest.TestCase):
             )
             self.assertEqual(meta["title"], "프론트 제목")
             self.assertEqual(meta["category"], "정책·제도")
+            self.assertEqual(meta["description"], "지정한 설명입니다.")
             self.assertEqual(meta["date"], "2026-03-03")
             self.assertEqual(meta["cover"], "/images/cover.jpg")
             self.assertEqual(meta["related"], [{"title": "다른 글", "href": "/posts/other/"}])
@@ -307,6 +309,126 @@ class PublishTests(unittest.TestCase):
         shortened = "# 제목\n\n짧습니다.\n"
         self.assertTrue(publish.validate_polish(original, shortened))
 
+    def test_dry_run_polish_prints_marked_markdown_without_writing(self) -> None:
+        original = long_article()
+        bad = original.replace("0.6", "0.7", 1)
+        good = original.replace("확인해야 합니다.", "점검해야 합니다.", 1)
+        self.assertTrue(any("숫자" in problem for problem in publish.validate_polish(original, bad)))
+        self.assertEqual(publish.validate_polish(original, good), [])
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "draft.md"
+            write_text(source, original)
+            args = publish.parse_args(
+                [
+                    str(source),
+                    "--category",
+                    "건강",
+                    "--slug",
+                    "polish-preview",
+                    "--date",
+                    "2026-11-12",
+                    "--no-related",
+                    "--dry-run",
+                    "--polish",
+                    "--root",
+                    str(root),
+                ]
+            )
+            with (
+                patch.dict(os.environ, {"GEMINI_API_KEY": "test-key"}),
+                patch.object(publish, "call_gemini", side_effect=[bad, good]) as gemini,
+                patch.object(publish, "fetch_cover_image_bytes", side_effect=AssertionError("image api")),
+                patch.object(publish, "request_cover_stem", side_effect=AssertionError("name api")),
+                redirect_stdout(io.StringIO()) as stdout,
+            ):
+                self.assertIsNone(publish.publish(args))
+            self.assertEqual(gemini.call_count, 2)
+            text = stdout.getvalue()
+            self.assertIn("파일은 쓰지 않았습니다", text)
+            self.assertIn("이미지 API를 호출하지 않고", text)
+            self.assertIn("320×320 JPEG를 생성합니다", text)
+            body = polished_between_markers(text)
+            self.assertEqual(body, good.strip("\n"))
+            self.assertIn("점검해야 합니다.", body)
+            self.assertIn("0.6", body)
+            self.assertNotIn("0.7", body)
+            self.assertIn("# 제목", body)
+            self.assertIn("## 기준", body)
+            for disclaimer in publish._DISCLAIMERS:
+                self.assertIn(disclaimer, body)
+            self.assertEqual([path.relative_to(root).as_posix() for path in root.rglob("*") if path.is_file()], ["draft.md"])
+
+    def test_failed_polish_does_not_print_or_write(self) -> None:
+        original = long_article()
+        bad = original.replace("0.6", "0.7", 1)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "draft.md"
+            write_text(source, original)
+            args = publish.parse_args(
+                [
+                    str(source),
+                    "--category",
+                    "건강",
+                    "--dry-run",
+                    "--polish",
+                    "--no-related",
+                    "--root",
+                    str(root),
+                ]
+            )
+            with (
+                patch.dict(os.environ, {"GEMINI_API_KEY": "test-key"}),
+                patch.object(publish, "call_gemini", side_effect=[bad, bad]),
+                patch.object(publish, "fetch_cover_image_bytes", side_effect=AssertionError("image api")),
+                redirect_stdout(io.StringIO()) as stdout,
+            ):
+                with self.assertRaises(publish.PublishError):
+                    publish.publish(args)
+            self.assertNotIn("=== POLISHED START ===", stdout.getvalue())
+            self.assertEqual(list(root.rglob("*")), [source])
+
+    def test_publish_polish_does_not_print_review_markers(self) -> None:
+        original = long_article()
+        good = original.replace("확인해야 합니다.", "점검해야 합니다.", 1)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "draft.md"
+            write_text(source, original)
+            args = publish.parse_args(
+                [
+                    str(source),
+                    "--category",
+                    "건강",
+                    "--slug",
+                    "polish-write",
+                    "--date",
+                    "2026-11-12",
+                    "--no-related",
+                    "--cover",
+                    "/images/cover.jpg",
+                    "--polish",
+                    "--root",
+                    str(root),
+                ]
+            )
+            with (
+                patch.dict(os.environ, {"GEMINI_API_KEY": "test-key"}),
+                patch.object(publish, "call_gemini", return_value=good),
+                patch.object(publish, "fetch_cover_image_bytes", side_effect=AssertionError("image api")),
+                redirect_stdout(io.StringIO()) as stdout,
+            ):
+                destination = publish.publish(args)
+            self.assertIsNotNone(destination)
+            text = stdout.getvalue()
+            self.assertNotIn("=== POLISHED START ===", text)
+            written = (root / "content" / "posts" / "polish-write.html").read_text(encoding="utf-8")
+            self.assertIn("점검해야 합니다.", written)
+            self.assertIn("0.6", written)
+            for disclaimer in publish._DISCLAIMERS:
+                self.assertIn(disclaimer, written)
+
     def test_push_command_is_not_forced(self) -> None:
         command = publish.push_command("cursor/stage2-post-publisher-521f")
         self.assertEqual(
@@ -390,10 +512,16 @@ class PublishTests(unittest.TestCase):
         self.assertIn('default: true', stage2)
         self.assertIn('default: false', stage2)
         self.assertIn('cmd+=(--cover "$COVER")', jobs)
+        self.assertIn("polished_path:", head)
+        self.assertIn("POLISHED_PATH:", jobs)
+        self.assertIn('source_path="$POLISHED_PATH"', jobs)
+        self.assertIn("use_polish=true", jobs)
         publisher = (ROOT / "publish.py").read_text(encoding="utf-8")
         self.assertIn("gemini-3.8-flash", publisher)
         self.assertIn("gemini-nano-banana-2.1", publisher)
         self.assertIn('"image_size": "1K"', publisher)
+        self.assertIn("=== POLISHED START ===", publisher)
+        self.assertIn("=== POLISHED END ===", publisher)
 
     def test_disclaimer_paragraphs_are_marked_without_changing_wording(self) -> None:
         health, policy = publish._DISCLAIMERS
@@ -1124,6 +1252,14 @@ class PublishTests(unittest.TestCase):
         self.assertIn("/posts/2026-year-end-tax-refund/", school)
         self.assertIn("2026 연말정산 환급금 3초 조회 방법", tax)
         self.assertIn(APPROVED_TITLE, school)
+
+
+def polished_between_markers(text: str) -> str:
+    start_mark = "=== POLISHED START ==="
+    end_mark = "=== POLISHED END ==="
+    start = text.index(start_mark) + len(start_mark)
+    end = text.index(end_mark)
+    return text[start:end].strip("\n")
 
 
 def sample_post(title: str, date: str, category: str = "건강") -> str:
