@@ -6,7 +6,7 @@ from pathlib import Path
 import publish
 
 ROOT = Path(__file__).resolve().parents[1]
-FUNERAL = ROOT / "manuscripts" / "2026-11-13-funeral-admin.md"
+FUNERAL = ROOT / "tests" / "fixtures" / "funeral-admin-jargon.md"
 WORKFLOW = ROOT / ".github" / "workflows" / "publish_post.yml"
 
 
