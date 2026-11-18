@@ -45,6 +45,40 @@ def run_publish(root: Path, *args: str, env: dict | None = None) -> subprocess.C
     )
 
 
+def assert_auto_related_rule(
+    test: unittest.TestCase,
+    posts: list[dict[str, str]],
+    slug: str,
+    category: str,
+) -> None:
+    """관련 글 규칙: 형제가 있으면 같은 분류만, 없으면 다른 분류. 자기 글은 빼며 개수는 RELATED_LIMIT 이하다.
+
+    최신순이고, 같은 날짜는 슬러그 오름차순이다. 특정 슬러그가 상위 N개에 남는지는 보지 않는다.
+    """
+    others = [post for post in posts if post["slug"] != slug]
+    siblings = [post for post in others if post.get("category") == category]
+    pool = siblings if siblings else others
+    ranked = sorted(pool, key=lambda post: post["slug"])
+    ranked.sort(key=lambda post: post["date"], reverse=True)
+    expected = [
+        {"title": post["title"], "href": f"/posts/{post['slug']}/"}
+        for post in ranked[: publish.RELATED_LIMIT]
+    ]
+    related = publish.auto_related(posts, slug, category)
+    hrefs = [item["href"] for item in related]
+    test.assertNotIn(f"/posts/{slug}/", hrefs)
+    test.assertLessEqual(len(related), publish.RELATED_LIMIT)
+    test.assertEqual(len(related), min(len(pool), publish.RELATED_LIMIT))
+    test.assertTrue(all(set(item) == {"title", "href"} for item in related))
+    test.assertTrue(
+        all(item["href"].startswith("/posts/") and "fieldtrip" not in item["href"] for item in related)
+    )
+    if siblings:
+        sibling_hrefs = {f"/posts/{post['slug']}/" for post in siblings}
+        test.assertTrue(all(href in sibling_hrefs for href in hrefs))
+    test.assertEqual(related, expected)
+
+
 class PublishTests(unittest.TestCase):
     def test_fixture_becomes_post_fragment(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1197,20 +1231,15 @@ class PublishTests(unittest.TestCase):
         self.assertEqual(by_slug["2026-year-end-tax-refund"]["category"], "세금")
         self.assertEqual(by_slug["2026-youth-rent-support"]["category"], "정부혜택")
         self.assertEqual(by_slug["starbucks-winter-frequency"]["category"], "생활정보")
+        for post in posts:
+            self.assertIn(post["category"], publish.ALLOWED_CATEGORIES)
 
-        benefit = publish.auto_related(posts, "brand-new", "정부혜택")
-        benefit_hrefs = [item["href"] for item in benefit]
-        self.assertIn("/posts/2026-youth-rent-support/", benefit_hrefs)
-        self.assertNotIn(f"/posts/{sagwan}/", benefit_hrefs)
-        self.assertLessEqual(len(benefit), publish.RELATED_LIMIT)
-        self.assertTrue(all(item["href"].startswith("/posts/") for item in benefit))
-
-        education = publish.auto_related(posts, "brand-new", "교육")
-        self.assertEqual(education, [{"title": by_slug[sagwan]["title"], "href": f"/posts/{sagwan}/"}])
-
-        science = publish.auto_related(posts, "brand-new", "과학")
-        self.assertEqual(len(science), publish.RELATED_LIMIT)
-        self.assertTrue(all(item["href"].startswith("/posts/") and "fieldtrip" not in item["href"] for item in science))
+        # 정부혜택처럼 형제가 RELATED_LIMIT보다 많으면 오래된 글은 관련 글에서 빠진다.
+        # 빠지는 슬러그를 고정하지 않고, 같은 분류·자기 글 제외·개수·최신순만 확인한다.
+        for category in publish.ALLOWED_CATEGORIES:
+            assert_auto_related_rule(self, posts, "brand-new", category)
+        for post in posts:
+            assert_auto_related_rule(self, posts, post["slug"], post["category"])
 
         tax = (ROOT / "content" / "posts" / "2026-year-end-tax-refund.html").read_text(encoding="utf-8")
         youth = (ROOT / "content" / "posts" / "2026-youth-rent-support.html").read_text(encoding="utf-8")
