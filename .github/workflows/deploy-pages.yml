@@ -2,6 +2,10 @@
 # Does not use a gh-pages branch and does not run the keyword pipeline.
 # One-time repo setting: Settings → Pages → Source: GitHub Actions.
 # The published artifact is out/ and includes CNAME (blog.mymallow.cloud).
+# Canonical URLs live in src/lib/site.ts. This workflow does not change the Pages custom domain.
+# content/** is on the path filter, so a post commit on main starts this rebuild.
+# publish_post.yml pushes with GITHUB_TOKEN (which does not fire this push trigger) and then
+# runs `gh workflow run deploy-pages.yml --ref main`. Keep workflow_dispatch.
 name: Deploy GitHub Pages
 
 on:
@@ -51,22 +55,35 @@ jobs:
         run: |
           test -f out/index.html
           test -f out/404.html
-          test -f out/posts/2026-youth-rent-support/index.html
-          test -f out/posts/starbucks-winter-frequency/index.html
-          test -f out/posts/2026-year-end-tax-refund/index.html
-          test -f out/posts/sagwanhakgyo-sinchegeomsa-bulhapgyeok-gijungwa-ipsi-jiwonja-jaegeom-daecheobeop/index.html
+          test -f out/blog/index.html
+          test -f out/tools/index.html
           test -f out/about/index.html
           test -f out/privacy/index.html
           test -f out/terms/index.html
+          test -f out/contact/index.html
+          post_count=0
+          for file in content/posts/*.html; do
+            slug=$(basename "$file" .html)
+            test -f "out/blog/${slug}/index.html"
+            test -f "out/posts/${slug}/index.html"
+            grep -q "https://mymallow.cloud/blog/${slug}/" "out/posts/${slug}/index.html"
+            grep -q 'http-equiv="refresh"' "out/posts/${slug}/index.html"
+            post_count=$((post_count + 1))
+          done
+          test "$post_count" -gt 0
           grep -q '소개' out/index.html
-          grep -q '개인정보 처리방침' out/index.html
+          grep -q '개인정보처리방침' out/index.html
           grep -q '이용약관' out/index.html
-          grep -q '개인정보 처리방침' out/posts/2026-youth-rent-support/index.html
+          grep -q '문의' out/index.html
+          grep -q '최신 글' out/index.html
           grep -q 'google-adsense-account' out/index.html
           grep -q 'ca-pub-5854572232694460' out/index.html
+          grep -q 'G-318MMGWL1K' out/index.html
           test -f out/sitemap.xml
-          grep -q 'sagwanhakgyo-sinchegeomsa-bulhapgyeok-gijungwa-ipsi-jiwonja-jaegeom-daecheobeop' out/sitemap.xml
+          grep -q 'https://mymallow.cloud/blog/' out/sitemap.xml
+          grep -q 'https://mymallow.cloud/tools/' out/sitemap.xml
           test -f out/robots.txt
+          grep -q 'https://mymallow.cloud/sitemap.xml' out/robots.txt
           test -f out/ads.txt
           grep -qx 'google.com, pub-5854572232694460, DIRECT, f08c47fec0942fa0' out/ads.txt
           test -f out/og-default.png
@@ -76,7 +93,7 @@ jobs:
           touch out/.nojekyll
           test ! -f out/main.py
           test ! -f out/requirements.txt
-          grep -q 'https://fieldtrip.mymallow.cloud/' out/posts/2026-youth-rent-support/index.html
+          grep -R -q 'https://fieldtrip.mymallow.cloud/' out/blog
           if grep -R -n --binary-files=without-match 'blog\.mallow\.cloud' out; then
             echo "found blog.mallow.cloud in the export"
             exit 1

@@ -12,7 +12,7 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
   ]),
   {
-    files: ["src/components/article-card.tsx"],
+    files: ["src/components/media-image.tsx"],
     rules: {
       "@next/next/no-img-element": "off",
     },

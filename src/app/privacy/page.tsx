@@ -3,7 +3,7 @@ import { InfoPage, infoMetadata } from "@/components/info-page";
 
 export const metadata = infoMetadata(
   "개인정보 처리방침",
-  "Mallow Info Lab의 개인정보 처리방침입니다. 수집 항목, 쿠키, Google AdSense, 제휴 링크를 적습니다.",
+  "마이멜로의 개인정보 처리방침입니다. 수집 항목, 쿠키, Google AdSense, 방문 분석, 제휴 링크를 적습니다.",
   "/privacy/",
 );
 
@@ -11,9 +11,9 @@ export default function PrivacyPage() {
   return (
     <InfoPage kicker="개인정보" title="개인정보 처리방침" lede="시행일 2026년 11월 12일">
       <p>
-        마이멜로(MyMallow, 이하 “운영자”)는 Mallow Info Lab(
-        <a href="https://blog.mymallow.cloud/">https://blog.mymallow.cloud/</a>
-        )을 운영하면서 이용자의 개인정보를 어떻게 다루는지 이 방침에 적습니다.
+        마이멜로(MyMallow, 이하 “운영자”)는 이 사이트(
+        <a href="https://mymallow.cloud/">https://mymallow.cloud/</a>
+        )를 운영하면서 이용자의 개인정보를 어떻게 다루는지 이 방침에 적습니다.
       </p>
       <h2>수집하는 정보</h2>
       <p>
@@ -29,7 +29,7 @@ export default function PrivacyPage() {
       <p>
         이 사이트는 Google AdSense 게시자 계정 <strong>ca-pub-5854572232694460</strong>과 연결되어
         있습니다. 각 페이지의 <strong>google-adsense-account</strong> 메타 태그와 사이트 루트의{" "}
-        <a href="https://blog.mymallow.cloud/ads.txt">ads.txt</a>가 그 계정을 알립니다.
+        <a href="https://mymallow.cloud/ads.txt">ads.txt</a>가 그 계정을 알립니다.
       </p>
       <p>
         현재 목록과 글 화면에는 광고를 그리는 스크립트를 넣지 않습니다. 그래서 이 페이지들이 직접 광고
@@ -50,8 +50,13 @@ export default function PrivacyPage() {
       </ul>
       <h2>방문 분석</h2>
       <p>
-        Google Analytics를 비롯한 방문 분석 도구는 현재 사용하지 않습니다. 분석용 쿠키를 심지 않습니다.
-        분석 도구를 도입하면 이 방침을 먼저 고칩니다.
+        이 사이트는 방문 통계를 위해 Google Analytics(측정 ID G-318MMGWL1K)를 사용합니다. 페이지를 열면
+        Google이 쿠키를 통해 방문 기록, 이용한 페이지, 대략적인 지역과 기기 정보를 처리할 수 있습니다.
+        운영자는 이 정보로 회원 프로필을 만들지 않습니다. Google의 처리 방식은{" "}
+        <a href="https://policies.google.com/privacy" target="_blank" rel="noopener noreferrer">
+          Google 개인정보처리방침
+        </a>
+        에서 확인할 수 있습니다.
       </p>
       <h2>제휴 링크</h2>
       <p>
@@ -74,9 +79,7 @@ export default function PrivacyPage() {
       <h2>운영자</h2>
       <p>
         운영 주체는{" "}
-        <a href="https://mymallow.cloud/" target="_blank" rel="noopener noreferrer">
-          마이멜로 (MyMallow)
-        </a>
+        <a href="https://mymallow.cloud/">마이멜로 (MyMallow)</a>
         입니다. 사이트 이용 조건은 <Link href="/terms/">이용약관</Link>에 적혀 있습니다.
       </p>
     </InfoPage>

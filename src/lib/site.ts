@@ -1,6 +1,9 @@
-export const SITE_URL = "https://blog.mymallow.cloud";
-export const SITE_NAME = "Mallow Info Lab";
-export const SITE_DESCRIPTION = "매일 업데이트되는 핵심 정책 & 생활 꿀팁 족보";
+// Canonical origin for sitemap, canonical, and og:url.
+// GitHub Pages CNAME stays blog.mymallow.cloud until the domain is moved.
+export const SITE_URL = "https://mymallow.cloud";
+export const SITE_NAME = "마이멜로";
+export const SITE_DESCRIPTION =
+  "아이와 부모의 오늘을 가볍고 부드럽게. 생활 정보와 바로 쓰는 도구를 모았습니다.";
 export const DEFAULT_OG_IMAGE = "/og-default.png";
 export const DEFAULT_OG_WIDTH = 1200;
 export const DEFAULT_OG_HEIGHT = 630;

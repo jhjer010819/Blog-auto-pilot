@@ -3,7 +3,7 @@ import { InfoPage, infoMetadata } from "@/components/info-page";
 
 export const metadata = infoMetadata(
   "이용약관",
-  "Mallow Info Lab 이용약관입니다. 정보의 성격, 저작권, 광고·제휴, 책임 한계를 적습니다.",
+  "마이멜로 이용약관입니다. 정보의 성격, 저작권, 광고·제휴, 책임 한계를 적습니다.",
   "/terms/",
 );
 
@@ -11,9 +11,9 @@ export default function TermsPage() {
   return (
     <InfoPage kicker="약관" title="이용약관" lede="시행일 2026년 11월 12일">
       <p>
-        이 약관은 마이멜로(MyMallow, 이하 “운영자”)가 제공하는 Mallow Info Lab(
-        <a href="https://blog.mymallow.cloud/">https://blog.mymallow.cloud/</a>, 이하 “사이트”)의 이용
-        조건을 정합니다.
+        이 약관은 마이멜로(MyMallow, 이하 “운영자”)가 제공하는 사이트(
+        <a href="https://mymallow.cloud/">https://mymallow.cloud/</a>, 이하 “사이트”)의 이용 조건을
+        정합니다.
       </p>
       <h2>목적</h2>
       <p>사이트는 정책, 제도, 생활 정보를 정리해 보여주는 블로그입니다.</p>
@@ -58,9 +58,7 @@ export default function TermsPage() {
       <h2>운영자</h2>
       <p>
         운영 주체는{" "}
-        <a href="https://mymallow.cloud/" target="_blank" rel="noopener noreferrer">
-          마이멜로 (MyMallow)
-        </a>
+        <a href="https://mymallow.cloud/">마이멜로 (MyMallow)</a>
         입니다.
       </p>
     </InfoPage>
