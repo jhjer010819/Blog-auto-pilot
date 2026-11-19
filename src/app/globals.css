@@ -3,11 +3,11 @@
 
 :root {
   color-scheme: light;
-  --paper: #f4f6fb;
-  --ink: #16181d;
-  --muted: #8b95a7;
-  --line: #e6ebf3;
-  --accent: #2f6bff;
+  --paper: #f4f7fb;
+  --ink: #121417;
+  --muted: #6b7280;
+  --line: #e6ebf2;
+  --accent: #0b8ec8;
 }
 
 html {
@@ -24,7 +24,7 @@ body {
 }
 
 ::selection {
-  background: #d9e6ff;
+  background: #d7f1fc;
 }
 
 a:focus-visible {

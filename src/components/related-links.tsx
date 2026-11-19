@@ -29,7 +29,7 @@ export function RelatedLinks({ links }: { links: PostLink[] }) {
         {links.map((link) => {
           const className = `flex items-center justify-between gap-4 rounded-2xl px-4 py-4 text-[15px] font-semibold leading-snug tracking-[-0.02em] text-[#1c2430] transition ${
             link.tone === "tool"
-              ? "bg-[#e8f1ff] hover:bg-[#dce8ff]"
+              ? "bg-[#e7f6fd] hover:bg-[#d7f1fc]"
               : "bg-white shadow-[0_4px_16px_rgba(22,34,61,0.04)] hover:bg-[#f8fbff]"
           }`;
           const inner = (

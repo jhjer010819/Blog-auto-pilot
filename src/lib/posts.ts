@@ -1,10 +1,11 @@
 import fs from "fs";
 import path from "path";
 import { excerptFromHtml, sanitizePostHtml } from "./html";
+import { publicHref, rewriteLegacyHrefs } from "./paths";
 
 const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const POSTS_DIR = path.join(process.cwd(), "content", "posts");
-const ALLOWED_CATEGORIES = [
+export const ALLOWED_CATEGORIES = [
   "교육",
   "건강",
   "과학",
@@ -74,9 +75,11 @@ export function parsePostSource(fileName: string, source: string): Post {
     date: meta.date,
     thumbnail: meta.thumbnail,
     thumbnailAlt: meta.thumbnailAlt || meta.title,
-    html,
+    html: rewriteLegacyHrefs(html),
     description: meta.description || excerptFromHtml(html),
-    links: meta.links,
+    links: meta.links.map((link) =>
+      link.external ? link : { ...link, href: publicHref(link.href) },
+    ),
   };
 }
 

@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import Script from "next/script";
 import { SiteFooter } from "@/components/site-footer";
+import { SiteHeader } from "@/components/site-header";
 import { ADSENSE_ACCOUNT, defaultOgImage, SITE_DESCRIPTION, SITE_NAME, SITE_URL } from "@/lib/site";
 import "./globals.css";
 
@@ -49,6 +50,7 @@ gtag('js', new Date());
 gtag('config', '${GA_MEASUREMENT_ID}');`}
         </Script>
         <div className="flex min-h-screen flex-col">
+          <SiteHeader />
           <div className="flex flex-1 flex-col">{children}</div>
           <SiteFooter />
         </div>
