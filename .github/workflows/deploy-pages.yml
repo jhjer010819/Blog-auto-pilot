@@ -1,7 +1,7 @@
 # Publishes the Next.js static export with GitHub Actions Pages.
 # Does not use a gh-pages branch and does not run the keyword pipeline.
 # One-time repo setting: Settings → Pages → Source: GitHub Actions.
-# The published artifact is out/ and includes CNAME (blog.mymallow.cloud).
+# The published artifact is out/ and includes CNAME (mymallow.cloud).
 # Canonical URLs live in src/lib/site.ts. This workflow does not change the Pages custom domain.
 # content/** is on the path filter, so a post commit on main starts this rebuild.
 # publish_post.yml pushes with GITHUB_TOKEN (which does not fire this push trigger) and then
@@ -88,8 +88,8 @@ jobs:
           grep -qx 'google.com, pub-5854572232694460, DIRECT, f08c47fec0942fa0' out/ads.txt
           test -f out/og-default.png
           test -f out/logo.png
-          printf '%s\n' 'blog.mymallow.cloud' > out/CNAME
-          grep -qx 'blog.mymallow.cloud' out/CNAME
+          printf '%s\n' 'mymallow.cloud' > out/CNAME
+          grep -qx 'mymallow.cloud' out/CNAME
           touch out/.nojekyll
           test ! -f out/main.py
           test ! -f out/requirements.txt
